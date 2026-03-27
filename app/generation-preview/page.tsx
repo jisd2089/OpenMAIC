@@ -22,12 +22,18 @@ import {
 import { getCurrentModelConfig } from '@/lib/utils/model-config';
 import { db } from '@/lib/utils/database';
 import { MAX_PDF_CONTENT_CHARS, MAX_VISION_IMAGES } from '@/lib/constants/generation';
+import { DEFAULT_SCOPE_ID } from '@/lib/constants/scope';
 import { nanoid } from 'nanoid';
 import type { Stage } from '@/lib/types/stage';
 import type { SceneOutline, PdfImage, ImageMapping } from '@/lib/types/generation';
 import { AgentRevealModal } from '@/components/agent/agent-reveal-modal';
 import { createLogger } from '@/lib/logger';
 import { type GenerationSessionState, ALL_STEPS, getActiveSteps } from './types';
+import {
+  buildGenerationParamsStorage,
+  buildGenerationSessionStorage,
+  parseGenerationSessionStorage,
+} from '@/lib/generation/session-storage';
 import { StepVisualizer } from './components/visualizers';
 
 const log = createLogger('GenerationPreview');
@@ -70,14 +76,11 @@ function GenerationPreviewContent() {
   useEffect(() => {
     cleanupOldImages(24).catch((e) => log.error(e));
 
-    const saved = sessionStorage.getItem('generationSession');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved) as GenerationSessionState;
-        setSession(parsed);
-      } catch (e) {
-        log.error('Failed to parse generation session:', e);
-      }
+    const parsed = parseGenerationSessionStorage(sessionStorage.getItem('generationSession'));
+    if (parsed) {
+      setSession(parsed);
+    } else if (sessionStorage.getItem('generationSession')) {
+      sessionStorage.removeItem('generationSession');
     }
     setSessionLoaded(true);
   }, []);
@@ -265,13 +268,13 @@ function GenerationPreviewContent() {
         );
 
         // Update session with parsed PDF data
-        const updatedSession = {
+        const updatedSession = buildGenerationSessionStorage({
           ...currentSession,
           pdfText,
           pdfImages,
           imageStorageIds,
           pdfStorageKey: undefined, // Clear so we don't re-parse
-        };
+        });
         setSession(updatedSession);
         sessionStorage.setItem('generationSession', JSON.stringify(updatedSession));
 
@@ -329,11 +332,11 @@ function GenerationPreviewContent() {
         }));
         setWebSearchSources(sources);
 
-        const updatedSessionWithSearch = {
+        const updatedSessionWithSearch = buildGenerationSessionStorage({
           ...currentSession,
           researchContext: searchData.context || '',
           researchSources: sources,
-        };
+        });
         setSession(updatedSessionWithSearch);
         sessionStorage.setItem('generationSession', JSON.stringify(updatedSessionWithSearch));
         currentSession = updatedSessionWithSearch;
@@ -364,15 +367,28 @@ function GenerationPreviewContent() {
 
       // Create stage client-side (needed for agent generation stageId)
       const stageId = nanoid(10);
-      const stage: Stage = {
-        id: stageId,
-        name: extractTopicFromRequirement(currentSession.requirements.requirement),
-        description: '',
-        language: currentSession.requirements.language || 'zh-CN',
-        style: 'professional',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
+        const stage: Stage = {
+          id: stageId,
+          name: extractTopicFromRequirement(currentSession.requirements.requirement),
+          description: '',
+          language: currentSession.requirements.language || 'zh-CN',
+          style: 'professional',
+          generationContext:
+            currentSession.knowledgeBaseIds?.length || currentSession.memoryIds?.length
+              ? {
+                  scopeId: currentSession.scopeId,
+                  knowledgeBaseIds: currentSession.knowledgeBaseIds,
+                  memoryIds: currentSession.memoryIds,
+                  selectedKnowledgeBases: currentSession.selectedKnowledgeBases,
+                  selectedMemories: currentSession.selectedMemories,
+                  enableKnowledgeRetrieval: currentSession.enableKnowledgeRetrieval,
+                  enableMemoryRetrieval: currentSession.enableMemoryRetrieval,
+                  preferKnowledgeVideos: currentSession.preferKnowledgeVideos,
+                }
+              : undefined,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
 
       if (settings.agentMode === 'auto') {
         const agentStepIdx = activeSteps.findIndex((s) => s.id === 'agent-generation');
@@ -536,6 +552,12 @@ function GenerationPreviewContent() {
             headers: getApiHeaders(),
             body: JSON.stringify({
               requirements: currentSession.requirements,
+              scopeId: currentSession.scopeId,
+              knowledgeBaseIds: currentSession.knowledgeBaseIds,
+              memoryIds: currentSession.memoryIds,
+              enableKnowledgeRetrieval: currentSession.enableKnowledgeRetrieval,
+              enableMemoryRetrieval: currentSession.enableMemoryRetrieval,
+              preferKnowledgeVideos: currentSession.preferKnowledgeVideos,
               pdfText: currentSession.pdfText,
               pdfImages: currentSession.pdfImages,
               imageMapping,
@@ -606,7 +628,10 @@ function GenerationPreviewContent() {
             .catch(reject);
         });
 
-        const updatedSession = { ...currentSession, sceneOutlines: outlines };
+        const updatedSession = buildGenerationSessionStorage({
+          ...currentSession,
+          sceneOutlines: outlines,
+        });
         setSession(updatedSession);
         sessionStorage.setItem('generationSession', JSON.stringify(updatedSession));
 
@@ -646,7 +671,7 @@ function GenerationPreviewContent() {
 
       const userProfile =
         currentSession.requirements.userNickname || currentSession.requirements.userBio
-          ? `Student: ${currentSession.requirements.userNickname || 'Unknown'}${currentSession.requirements.userBio ? ` — ${currentSession.requirements.userBio}` : ''}`
+          ? `Student: ${currentSession.requirements.userNickname || 'Unknown'}${currentSession.requirements.userBio ? ` - ${currentSession.requirements.userBio}` : ''}`
           : undefined;
 
       // Generate ONLY the first scene
@@ -661,6 +686,12 @@ function GenerationPreviewContent() {
         body: JSON.stringify({
           outline: firstOutline,
           allOutlines: outlines,
+          scopeId: currentSession.scopeId,
+          knowledgeBaseIds: currentSession.knowledgeBaseIds,
+          memoryIds: currentSession.memoryIds,
+          enableKnowledgeRetrieval: currentSession.enableKnowledgeRetrieval,
+          enableMemoryRetrieval: currentSession.enableMemoryRetrieval,
+          preferKnowledgeVideos: currentSession.preferKnowledgeVideos,
           pdfImages: currentSession.pdfImages,
           imageMapping,
           stageInfo,
@@ -704,13 +735,24 @@ function GenerationPreviewContent() {
         throw new Error(errorData.error || t('generation.sceneGenerateFailed'));
       }
 
-      const data = await actionsResp.json();
-      if (!data.success || !data.scene) {
-        throw new Error(data.error || t('generation.sceneGenerateFailed'));
-      }
+        const data = await actionsResp.json();
+        if (!data.success || !data.scene) {
+          throw new Error(data.error || t('generation.sceneGenerateFailed'));
+        }
 
-      // Generate TTS for first scene (part of actions step — blocking)
-      if (settings.ttsEnabled && settings.ttsProviderId !== 'browser-native-tts') {
+        data.scene = {
+          ...data.scene,
+          generationContext:
+            contentData.retrievalContext || contentData.knowledgeVideoReferences?.length
+              ? {
+                  retrievalContext: contentData.retrievalContext,
+                  knowledgeVideoReferences: contentData.knowledgeVideoReferences,
+                }
+              : undefined,
+        };
+
+        // Generate TTS for first scene (part of actions step - blocking)
+        if (settings.ttsEnabled && settings.ttsProviderId !== 'browser-native-tts') {
         const ttsProviderConfig = settings.ttsProvidersConfig?.[settings.ttsProviderId];
         const speechActions = (data.scene.actions || []).filter(
           (a: { type: string; text?: string }) => a.type === 'speech' && a.text,
@@ -776,11 +818,21 @@ function GenerationPreviewContent() {
       // Store generation params for classroom to continue generation
       sessionStorage.setItem(
         'generationParams',
-        JSON.stringify({
-          pdfImages: currentSession.pdfImages,
-          agents,
-          userProfile,
-        }),
+        JSON.stringify(
+          buildGenerationParamsStorage({
+            pdfImages: currentSession.pdfImages,
+            scopeId: currentSession.scopeId ?? DEFAULT_SCOPE_ID,
+            agents,
+            userProfile,
+            knowledgeBaseIds: currentSession.knowledgeBaseIds,
+            memoryIds: currentSession.memoryIds,
+            selectedKnowledgeBases: currentSession.selectedKnowledgeBases,
+            selectedMemories: currentSession.selectedMemories,
+            enableKnowledgeRetrieval: currentSession.enableKnowledgeRetrieval,
+            enableMemoryRetrieval: currentSession.enableMemoryRetrieval,
+            preferKnowledgeVideos: currentSession.preferKnowledgeVideos,
+          }),
+        ),
       );
 
       sessionStorage.removeItem('generationSession');
@@ -896,6 +948,48 @@ function GenerationPreviewContent() {
                 />
               ))}
             </div>
+
+            {(session.knowledgeBaseIds?.length || session.memoryIds?.length) && (
+              <div className="absolute top-12 left-6 right-6 flex flex-col items-center gap-2">
+                <div className="flex flex-wrap justify-center gap-2">
+                {session.knowledgeBaseIds && session.knowledgeBaseIds.length > 0 ? (
+                  <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-[11px] font-medium text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-300">
+                    {session.knowledgeBaseIds.length} knowledge base
+                    {session.knowledgeBaseIds.length > 1 ? 's' : ''}
+                  </span>
+                ) : null}
+                {session.memoryIds && session.memoryIds.length > 0 ? (
+                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-medium text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300">
+                    {session.memoryIds.length} memory note
+                    {session.memoryIds.length > 1 ? 's' : ''}
+                  </span>
+                ) : null}
+                {session.preferKnowledgeVideos ? (
+                  <span className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-[11px] font-medium text-violet-700 dark:border-violet-900/60 dark:bg-violet-950/40 dark:text-violet-300">
+                    prefer videos
+                  </span>
+                ) : null}
+                </div>
+                <div className="flex max-w-md flex-wrap justify-center gap-2">
+                  {session.selectedKnowledgeBases?.map((item) => (
+                    <span
+                      key={`kb-${item.id}`}
+                      className="rounded-full border border-blue-100 bg-blue-50/70 px-2.5 py-1 text-[10px] text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300"
+                    >
+                      {item.name}
+                    </span>
+                  ))}
+                  {session.selectedMemories?.map((item) => (
+                    <span
+                      key={`memory-${item.id}`}
+                      className="rounded-full border border-emerald-100 bg-emerald-50/70 px-2.5 py-1 text-[10px] text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300"
+                    >
+                      {item.category}: {item.contentPreview}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Central Content */}
             <div className="flex-1 flex flex-col items-center justify-center w-full space-y-8 mt-4">

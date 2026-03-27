@@ -9,7 +9,9 @@ import { NextRequest } from 'next/server';
 import { callLLM } from '@/lib/ai/llm';
 import type { PBLAgent, PBLIssue } from '@/lib/pbl/types';
 import { createLogger } from '@/lib/logger';
-import { apiError, apiSuccess } from '@/lib/server/api-response';
+import { apiError, apiSuccess, API_ERROR_CODES } from '@/lib/server/api-response';
+import { parseJsonRequestWithSchema } from '@/lib/server/http-validation';
+import { pblChatRequestSchema } from '@/lib/server/generation/contracts';
 import { resolveModelFromHeaders } from '@/lib/server/resolve-model';
 const log = createLogger('PBL Chat');
 
@@ -24,12 +26,12 @@ interface PBLChatRequest {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as PBLChatRequest;
-    const { message, agent, currentIssue, recentMessages, userRole, agentType } = body;
-
-    if (!message || !agent) {
-      return apiError('MISSING_REQUIRED_FIELD', 400, 'Message and agent are required');
+    const parsed = await parseJsonRequestWithSchema(req, pblChatRequestSchema);
+    if (!parsed.success) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, parsed.error);
     }
+    const body = parsed.data as PBLChatRequest;
+    const { message, agent, currentIssue, recentMessages, userRole, agentType } = body;
 
     // Get model config from headers
     const { model } = resolveModelFromHeaders(req);

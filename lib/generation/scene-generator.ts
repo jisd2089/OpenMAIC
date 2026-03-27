@@ -45,6 +45,7 @@ import type {
   GenerationCallbacks,
 } from './pipeline-types';
 import { createLogger } from '@/lib/logger';
+import type { KnowledgeVideoReference } from '@/lib/kb/reference';
 const log = createLogger('Generation');
 
 // ==================== Stage 2: Full Scenes (Two-Step) ====================
@@ -155,6 +156,8 @@ export async function generateSceneContent(
   visionEnabled?: boolean,
   generatedMediaMapping?: ImageMapping,
   agents?: AgentInfo[],
+  knowledgeVideoReferences?: KnowledgeVideoReference[],
+  retrievalContext?: string,
 ): Promise<
   | GeneratedSlideContent
   | GeneratedQuizContent
@@ -189,6 +192,8 @@ export async function generateSceneContent(
         visionEnabled,
         generatedMediaMapping,
         agents,
+        knowledgeVideoReferences,
+        retrievalContext,
       );
     case 'quiz':
       return generateQuizContent(outline, aiCall);
@@ -466,6 +471,8 @@ async function generateSlideContent(
   visionEnabled?: boolean,
   generatedMediaMapping?: ImageMapping,
   agents?: AgentInfo[],
+  knowledgeVideoReferences?: KnowledgeVideoReference[],
+  retrievalContext?: string,
 ): Promise<GeneratedSlideContent | null> {
   const lang = outline.language || 'zh-CN';
 
@@ -529,11 +536,32 @@ async function generateSlideContent(
     }
   }
 
+  if (knowledgeVideoReferences && knowledgeVideoReferences.length > 0) {
+    const knowledgeVideoText = knowledgeVideoReferences
+      .map(
+        (ref) =>
+          `- ${ref.filename}: use video src "${ref.src}"${ref.score != null ? ` (relevance: ${ref.score.toFixed(2)})` : ''}${ref.durationMs != null ? `, duration: ${Math.round(ref.durationMs / 1000)}s` : ''}${ref.width != null && ref.height != null ? `, resolution: ${ref.width}x${ref.height}` : ''}`,
+      )
+      .join('\n');
+
+    const section = `Knowledge Base Videos (you may use these exact src values for video elements):\n${knowledgeVideoText}`;
+    if (assignedImagesText.includes('禁止插入') || assignedImagesText.includes('No images')) {
+      assignedImagesText = section;
+    } else {
+      assignedImagesText += `\n\n${section}`;
+    }
+  }
+
   // Canvas dimensions (matching viewportSize and viewportRatio)
   const canvasWidth = 1000;
   const canvasHeight = 562.5;
 
-  const teacherContext = formatTeacherPersonaForPrompt(agents);
+  const teacherContext = [
+    formatTeacherPersonaForPrompt(agents),
+    retrievalContext ? `## Retrieved Context\n${retrievalContext}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 
   const prompts = buildPrompt(PROMPT_IDS.SLIDE_CONTENT, {
     title: outline.title,

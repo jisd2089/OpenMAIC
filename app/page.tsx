@@ -1,14 +1,17 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   ArrowUp,
+  Brain,
   Check,
   ChevronDown,
   Clock,
   Copy,
+  Database,
+  Film,
   ImagePlus,
   Pencil,
   Trash2,
@@ -22,6 +25,7 @@ import {
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { createLogger } from '@/lib/logger';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Textarea as UITextarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { SettingsDialog } from '@/components/settings';
@@ -41,17 +45,26 @@ import {
 } from '@/lib/utils/stage-storage';
 import { ThumbnailSlide } from '@/components/slide-renderer/components/ThumbnailSlide';
 import type { Slide } from '@/lib/types/slides';
+import type { SelectedKnowledgeBaseSummary, SelectedMemorySummary } from '@/lib/types/stage';
 import { useMediaGenerationStore } from '@/lib/store/media-generation';
 import { toast } from 'sonner';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useDraftCache } from '@/lib/hooks/use-draft-cache';
 import { SpeechButton } from '@/components/audio/speech-button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { DEFAULT_SCOPE_ID } from '@/lib/constants/scope';
+import { buildGenerationSessionStorage } from '@/lib/generation/session-storage';
+import type { KnowledgeBaseSummary } from '@/lib/server/kb/contracts';
+import type { MemoryNoteSummary } from '@/lib/server/memory/contracts';
 
 const log = createLogger('Home');
 
 const WEB_SEARCH_STORAGE_KEY = 'webSearchEnabled';
 const LANGUAGE_STORAGE_KEY = 'generationLanguage';
 const RECENT_OPEN_STORAGE_KEY = 'recentClassroomsOpen';
+const KB_SELECTION_STORAGE_KEY = 'generationKnowledgeBaseIds';
+const MEMORY_SELECTION_STORAGE_KEY = 'generationMemoryIds';
+const PREFER_KB_VIDEO_STORAGE_KEY = 'generationPreferKnowledgeVideos';
 
 interface FormState {
   pdfFile: File | null;
@@ -86,7 +99,6 @@ function HomePage() {
   const [recentOpen, setRecentOpen] = useState(true);
 
   // Hydrate client-only state after mount (avoids SSR mismatch)
-  /* eslint-disable react-hooks/set-state-in-effect -- Hydration from localStorage must happen in effect */
   useEffect(() => {
     try {
       const saved = localStorage.getItem(RECENT_OPEN_STORAGE_KEY);
@@ -97,6 +109,9 @@ function HomePage() {
     try {
       const savedWebSearch = localStorage.getItem(WEB_SEARCH_STORAGE_KEY);
       const savedLanguage = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+      const savedKnowledgeBaseIds = localStorage.getItem(KB_SELECTION_STORAGE_KEY);
+      const savedMemoryIds = localStorage.getItem(MEMORY_SELECTION_STORAGE_KEY);
+      const savedPreferKnowledgeVideos = localStorage.getItem(PREFER_KB_VIDEO_STORAGE_KEY);
       const updates: Partial<FormState> = {};
       if (savedWebSearch === 'true') updates.webSearch = true;
       if (savedLanguage === 'zh-CN' || savedLanguage === 'en-US') {
@@ -108,13 +123,21 @@ function HomePage() {
       if (Object.keys(updates).length > 0) {
         setForm((prev) => ({ ...prev, ...updates }));
       }
+      if (savedKnowledgeBaseIds) {
+        setSelectedKnowledgeBaseIds(JSON.parse(savedKnowledgeBaseIds) as string[]);
+      }
+      if (savedMemoryIds) {
+        setSelectedMemoryIds(JSON.parse(savedMemoryIds) as string[]);
+      }
+      if (savedPreferKnowledgeVideos !== null) {
+        setPreferKnowledgeVideos(savedPreferKnowledgeVideos !== 'false');
+      }
     } catch {
       /* localStorage unavailable */
     }
   }, []);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
-  // Restore requirement draft from cache (derived state pattern — no effect needed)
+  // Restore requirement draft from cache (derived state pattern - no effect needed)
   const [prevCachedRequirement, setPrevCachedRequirement] = useState(cachedRequirement);
   if (cachedRequirement !== prevCachedRequirement) {
     setPrevCachedRequirement(cachedRequirement);
@@ -125,12 +148,63 @@ function HomePage() {
 
   const [languageOpen, setLanguageOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
+  const [retrievalPanelOpen, setRetrievalPanelOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [classrooms, setClassrooms] = useState<StageListItem[]>([]);
   const [thumbnails, setThumbnails] = useState<Record<string, Slide>>({});
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [knowledgeBaseOptions, setKnowledgeBaseOptions] = useState<KnowledgeBaseSummary[]>([]);
+  const [memoryNoteOptions, setMemoryNoteOptions] = useState<MemoryNoteSummary[]>([]);
+  const [selectedKnowledgeBaseIds, setSelectedKnowledgeBaseIds] = useState<string[]>([]);
+  const [selectedMemoryIds, setSelectedMemoryIds] = useState<string[]>([]);
+  const [preferKnowledgeVideos, setPreferKnowledgeVideos] = useState(true);
+  const [knowledgeBaseFilter, setKnowledgeBaseFilter] = useState('');
+  const [memoryFilter, setMemoryFilter] = useState('');
+  const [knowledgeOnlySelected, setKnowledgeOnlySelected] = useState(false);
+  const [memoryOnlySelected, setMemoryOnlySelected] = useState(false);
+  const [loadingRetrievalOptions, setLoadingRetrievalOptions] = useState(false);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const filteredKnowledgeBaseOptions = useMemo(() => {
+    const keyword = knowledgeBaseFilter.trim().toLowerCase();
+    const items = [...knowledgeBaseOptions].sort((a, b) => {
+      const aSelected = selectedKnowledgeBaseIds.includes(a.id) ? 1 : 0;
+      const bSelected = selectedKnowledgeBaseIds.includes(b.id) ? 1 : 0;
+      if (aSelected !== bSelected) return bSelected - aSelected;
+      return b.updatedAt - a.updatedAt;
+    });
+    const filtered = items.filter(
+      (item) =>
+        (!keyword ||
+          item.name.toLowerCase().includes(keyword) ||
+          item.description?.toLowerCase().includes(keyword)) &&
+        (!knowledgeOnlySelected || selectedKnowledgeBaseIds.includes(item.id)),
+    );
+    return filtered;
+  }, [
+    knowledgeBaseFilter,
+    knowledgeBaseOptions,
+    knowledgeOnlySelected,
+    selectedKnowledgeBaseIds,
+  ]);
+  const filteredMemoryOptions = useMemo(() => {
+    const keyword = memoryFilter.trim().toLowerCase();
+    const items = [...memoryNoteOptions].sort((a, b) => {
+      const aSelected = selectedMemoryIds.includes(a.id) ? 1 : 0;
+      const bSelected = selectedMemoryIds.includes(b.id) ? 1 : 0;
+      if (aSelected !== bSelected) return bSelected - aSelected;
+      if (a.isPinned !== b.isPinned) return Number(b.isPinned) - Number(a.isPinned);
+      return b.updatedAt - a.updatedAt;
+    });
+    const filtered = items.filter(
+      (item) =>
+        (!keyword ||
+          item.content.toLowerCase().includes(keyword) ||
+          item.category.toLowerCase().includes(keyword)) &&
+        (!memoryOnlySelected || selectedMemoryIds.includes(item.id)),
+    );
+    return filtered;
+  }, [memoryFilter, memoryNoteOptions, memoryOnlySelected, selectedMemoryIds]);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -159,6 +233,40 @@ function HomePage() {
     }
   };
 
+  const loadRetrievalOptions = async () => {
+    setLoadingRetrievalOptions(true);
+    try {
+      const [kbRes, memoryRes] = await Promise.all([
+        fetch(`/api/kb?scopeId=${encodeURIComponent(DEFAULT_SCOPE_ID)}&page=1&pageSize=100`),
+        fetch(
+          `/api/memory?scopeId=${encodeURIComponent(DEFAULT_SCOPE_ID)}&page=1&pageSize=100`,
+        ),
+      ]);
+
+      const kbData = (await kbRes.json().catch(() => null)) as
+        | { success: true; items: KnowledgeBaseSummary[] }
+        | null;
+      const memoryData = (await memoryRes.json().catch(() => null)) as
+        | { success: true; items: MemoryNoteSummary[] }
+        | null;
+
+      const nextKnowledgeBases = kbData?.success ? kbData.items : [];
+      const nextMemories = memoryData?.success ? memoryData.items : [];
+      setKnowledgeBaseOptions(nextKnowledgeBases);
+      setMemoryNoteOptions(nextMemories);
+      setSelectedKnowledgeBaseIds((current) =>
+        current.filter((id) => nextKnowledgeBases.some((item) => item.id === id)),
+      );
+      setSelectedMemoryIds((current) =>
+        current.filter((id) => nextMemories.some((item) => item.id === id)),
+      );
+    } catch (err) {
+      log.error('Failed to load retrieval options:', err);
+    } finally {
+      setLoadingRetrievalOptions(false);
+    }
+  };
+
   useEffect(() => {
     // Clear stale media store to prevent cross-course thumbnail contamination.
     // The store may hold tasks from a previously visited classroom whose elementIds
@@ -166,8 +274,8 @@ function HomePage() {
     useMediaGenerationStore.getState().revokeObjectUrls();
     useMediaGenerationStore.setState({ tasks: {} });
 
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- Store hydration on mount
     loadClassrooms();
+    loadRetrievalOptions();
   }, []);
 
   const handleDelete = (id: string, e: React.MouseEvent) => {
@@ -195,6 +303,20 @@ function HomePage() {
     } catch {
       /* ignore */
     }
+  };
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(KB_SELECTION_STORAGE_KEY, JSON.stringify(selectedKnowledgeBaseIds));
+      localStorage.setItem(MEMORY_SELECTION_STORAGE_KEY, JSON.stringify(selectedMemoryIds));
+      localStorage.setItem(PREFER_KB_VIDEO_STORAGE_KEY, String(preferKnowledgeVideos));
+    } catch {
+      /* ignore */
+    }
+  }, [preferKnowledgeVideos, selectedKnowledgeBaseIds, selectedMemoryIds]);
+
+  const toggleSelection = (id: string, current: string[], setter: (value: string[]) => void) => {
+    setter(current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   };
 
   const showSetupToast = (icon: React.ReactNode, title: string, desc: string) => {
@@ -276,9 +398,32 @@ function HomePage() {
         }
       }
 
-      const sessionState = {
+      const sessionState = buildGenerationSessionStorage({
         sessionId: nanoid(),
         requirements,
+        scopeId: DEFAULT_SCOPE_ID,
+        knowledgeBaseIds: selectedKnowledgeBaseIds,
+        memoryIds: selectedMemoryIds,
+        selectedKnowledgeBases: knowledgeBaseOptions
+          .filter((item) => selectedKnowledgeBaseIds.includes(item.id))
+          .map(
+            (item): SelectedKnowledgeBaseSummary => ({
+              id: item.id,
+              name: item.name,
+            }),
+          ),
+        selectedMemories: memoryNoteOptions
+          .filter((item) => selectedMemoryIds.includes(item.id))
+          .map(
+            (item): SelectedMemorySummary => ({
+              id: item.id,
+              category: item.category,
+              contentPreview: item.content.slice(0, 120),
+            }),
+          ),
+        enableKnowledgeRetrieval: selectedKnowledgeBaseIds.length > 0,
+        enableMemoryRetrieval: selectedMemoryIds.length > 0,
+        preferKnowledgeVideos,
         pdfText: '',
         pdfImages: [],
         imageStorageIds: [],
@@ -288,7 +433,7 @@ function HomePage() {
         pdfProviderConfig,
         sceneOutlines: null,
         currentStep: 'generating' as const,
-      };
+      });
       sessionStorage.setItem('generationSession', JSON.stringify(sessionState));
 
       router.push('/generation-preview');
@@ -321,7 +466,7 @@ function HomePage() {
 
   return (
     <div className="min-h-[100dvh] w-full bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 flex flex-col items-center p-4 pt-16 md:p-8 md:pt-16 overflow-x-hidden">
-      {/* ═══ Top-right pill (unchanged) ═══ */}
+      {/* Top-right pill (unchanged) */}
       <div
         ref={toolbarRef}
         className="fixed top-4 right-4 z-50 flex items-center gap-1 bg-white/60 dark:bg-gray-800/60 backdrop-blur-md px-2 py-1.5 rounded-full border border-gray-100/50 dark:border-gray-700/50 shadow-sm"
@@ -453,7 +598,7 @@ function HomePage() {
         initialSection={settingsSection}
       />
 
-      {/* ═══ Background Decor ═══ */}
+      {/* Background decor */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div
           className="absolute top-0 left-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl animate-pulse"
@@ -465,7 +610,7 @@ function HomePage() {
         />
       </div>
 
-      {/* ═══ Hero section: title + input (centered, wider) ═══ */}
+      {/* Hero section: title + input (centered, wider) */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -475,7 +620,7 @@ function HomePage() {
           classrooms.length === 0 ? 'justify-center min-h-[calc(100dvh-8rem)]' : 'mt-[10vh]',
         )}
       >
-        {/* ── Logo ── */}
+        {/* Logo */}
         <motion.img
           src="/logo-horizontal.png"
           alt="OpenMAIC"
@@ -490,7 +635,7 @@ function HomePage() {
           className="h-12 md:h-16 mb-2 -ml-2 md:-ml-3"
         />
 
-        {/* ── Slogan ── */}
+        {/* Slogan */}
         <motion.p
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -500,7 +645,7 @@ function HomePage() {
           {t('home.slogan')}
         </motion.p>
 
-        {/* ── Unified input area ── */}
+        {/* Unified input area */}
         <motion.div
           initial={{ opacity: 0, scale: 0.97 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -508,7 +653,7 @@ function HomePage() {
           className="w-full"
         >
           <div className="w-full rounded-2xl border border-border/60 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl shadow-xl shadow-black/[0.03] dark:shadow-black/20 transition-shadow focus-within:shadow-2xl focus-within:shadow-violet-500/[0.06]">
-            {/* ── Greeting + Profile + Agents ── */}
+            {/* Greeting + profile + agents */}
             <div className="relative z-20 flex items-start justify-between">
               <GreetingBar />
               <div className="pr-3 pt-3.5 shrink-0">
@@ -545,6 +690,20 @@ function HomePage() {
                 />
               </div>
 
+              <button
+                onClick={() => setRetrievalPanelOpen((open) => !open)}
+                className="shrink-0 h-8 rounded-lg border border-border/60 bg-background/80 px-3 text-xs font-medium text-foreground/75 transition hover:bg-background hover:text-foreground"
+              >
+                {`Context ${selectedKnowledgeBaseIds.length + selectedMemoryIds.length}`}
+              </button>
+
+              <button
+                onClick={() => router.push('/knowledge')}
+                className="shrink-0 h-8 rounded-lg border border-border/60 bg-background/80 px-3 text-xs font-medium text-foreground/75 transition hover:bg-background hover:text-foreground"
+              >
+                Workspace
+              </button>
+
               {/* Voice input */}
               <SpeechButton
                 size="md"
@@ -572,10 +731,194 @@ function HomePage() {
                 <ArrowUp className="size-3.5" />
               </button>
             </div>
+
+            <AnimatePresence>
+              {retrievalPanelOpen && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden border-t border-border/60"
+                >
+                  <div className="grid gap-3 px-3 py-3 md:grid-cols-2">
+                    <div className="rounded-xl border border-border/60 bg-background/70 p-3">
+                      <div className="mb-3 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                          <Database className="size-4" />
+                          Knowledge Bases
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {selectedKnowledgeBaseIds.length} selected
+                        </span>
+                      </div>
+                      <Input
+                        value={knowledgeBaseFilter}
+                        onChange={(event) => setKnowledgeBaseFilter(event.target.value)}
+                        placeholder="Search knowledge bases"
+                        className="mb-3 h-8 bg-background/80 text-xs"
+                      />
+                      <div className="mb-3 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                        <label className="inline-flex items-center gap-2">
+                          <Checkbox
+                            checked={knowledgeOnlySelected}
+                            onCheckedChange={(checked) =>
+                              setKnowledgeOnlySelected(checked !== false)
+                            }
+                          />
+                          Only selected
+                        </label>
+                        {selectedKnowledgeBaseIds.length > 0 ? (
+                          <button
+                            onClick={() => setSelectedKnowledgeBaseIds([])}
+                            className="font-medium text-foreground/70 transition hover:text-foreground"
+                          >
+                            Clear
+                          </button>
+                        ) : null}
+                      </div>
+                      <div className="max-h-40 space-y-2 overflow-y-auto pr-1">
+                        {filteredKnowledgeBaseOptions.length === 0 ? (
+                          <div className="rounded-lg border border-dashed border-border/70 px-3 py-3 text-xs text-muted-foreground">
+                            {knowledgeBaseOptions.length === 0
+                              ? 'No knowledge bases yet. Create them in Workspace.'
+                              : 'No knowledge bases match the current filter.'}
+                          </div>
+                        ) : (
+                          filteredKnowledgeBaseOptions.map((item) => (
+                            <label
+                              key={item.id}
+                              className="flex cursor-pointer items-start gap-3 rounded-lg border border-border/60 bg-background/80 px-3 py-2"
+                            >
+                              <Checkbox
+                                checked={selectedKnowledgeBaseIds.includes(item.id)}
+                                onCheckedChange={() =>
+                                  toggleSelection(
+                                    item.id,
+                                    selectedKnowledgeBaseIds,
+                                    setSelectedKnowledgeBaseIds,
+                                  )
+                                }
+                              />
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate text-sm font-medium text-foreground">
+                                  {item.name}
+                                </div>
+                                <div className="mt-0.5 text-xs text-muted-foreground">
+                                  {item.fileCount} files
+                                  {item.description ? ` - ${item.description}` : ''}
+                                </div>
+                              </div>
+                            </label>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-border/60 bg-background/70 p-3">
+                      <div className="mb-3 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                          <Brain className="size-4" />
+                          Memory Notes
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {selectedMemoryIds.length} selected
+                        </span>
+                      </div>
+                      <Input
+                        value={memoryFilter}
+                        onChange={(event) => setMemoryFilter(event.target.value)}
+                        placeholder="Search memory notes"
+                        className="mb-3 h-8 bg-background/80 text-xs"
+                      />
+                      <div className="mb-3 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                        <label className="inline-flex items-center gap-2">
+                          <Checkbox
+                            checked={memoryOnlySelected}
+                            onCheckedChange={(checked) =>
+                              setMemoryOnlySelected(checked !== false)
+                            }
+                          />
+                          Only selected
+                        </label>
+                        {selectedMemoryIds.length > 0 ? (
+                          <button
+                            onClick={() => setSelectedMemoryIds([])}
+                            className="font-medium text-foreground/70 transition hover:text-foreground"
+                          >
+                            Clear
+                          </button>
+                        ) : null}
+                      </div>
+                      <div className="max-h-40 space-y-2 overflow-y-auto pr-1">
+                        {filteredMemoryOptions.length === 0 ? (
+                          <div className="rounded-lg border border-dashed border-border/70 px-3 py-3 text-xs text-muted-foreground">
+                            {memoryNoteOptions.length === 0
+                              ? 'No memory notes yet. Create them in Workspace.'
+                              : 'No memory notes match the current filter.'}
+                          </div>
+                        ) : (
+                          filteredMemoryOptions.map((item) => (
+                            <label
+                              key={item.id}
+                              className="flex cursor-pointer items-start gap-3 rounded-lg border border-border/60 bg-background/80 px-3 py-2"
+                            >
+                              <Checkbox
+                                checked={selectedMemoryIds.includes(item.id)}
+                                onCheckedChange={() =>
+                                  toggleSelection(item.id, selectedMemoryIds, setSelectedMemoryIds)
+                                }
+                              />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                  <span>{item.category}</span>
+                                  {item.isPinned && <span>pinned</span>}
+                                </div>
+                                <div className="mt-1 line-clamp-2 text-sm text-foreground">
+                                  {item.content}
+                                </div>
+                              </div>
+                            </label>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-3 px-3 pb-3 text-xs text-muted-foreground">
+                    <label className="inline-flex items-center gap-2">
+                      <Checkbox
+                        checked={preferKnowledgeVideos}
+                        onCheckedChange={(checked) =>
+                          setPreferKnowledgeVideos(checked !== false)
+                        }
+                      />
+                      Prefer knowledge base videos
+                    </label>
+                    <button
+                      onClick={() => void loadRetrievalOptions()}
+                      className="font-medium text-foreground/70 transition hover:text-foreground"
+                    >
+                      {loadingRetrievalOptions ? 'Refreshing...' : 'Refresh sources'}
+                    </button>
+                    {selectedKnowledgeBaseIds.length > 0 || selectedMemoryIds.length > 0 ? (
+                      <button
+                        onClick={() => {
+                          setSelectedKnowledgeBaseIds([]);
+                          setSelectedMemoryIds([]);
+                        }}
+                        className="font-medium text-foreground/70 transition hover:text-foreground"
+                      >
+                        Clear all selections
+                      </button>
+                    ) : null}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </motion.div>
 
-        {/* ── Error ── */}
+        {/* Error */}
         <AnimatePresence>
           {error && (
             <motion.div
@@ -590,7 +933,7 @@ function HomePage() {
         </AnimatePresence>
       </motion.div>
 
-      {/* ═══ Recent classrooms — collapsible ═══ */}
+      {/* Recent classrooms - collapsible */}
       {classrooms.length > 0 && (
         <motion.div
           initial={{ opacity: 0 }}
@@ -598,7 +941,7 @@ function HomePage() {
           transition={{ delay: 0.5 }}
           className="relative z-10 mt-10 w-full max-w-6xl flex flex-col items-center"
         >
-          {/* Trigger — divider-line with centered text */}
+          {/* Trigger - divider-line with centered text */}
           <button
             onClick={() => {
               const next = !recentOpen;
@@ -667,7 +1010,7 @@ function HomePage() {
         </motion.div>
       )}
 
-      {/* Footer — flows with content, at the very end */}
+      {/* Footer - flows with content, at the very end */}
       <div className="mt-auto pt-12 pb-4 text-center text-xs text-muted-foreground/40">
         OpenMAIC Open Source Project
       </div>
@@ -675,7 +1018,7 @@ function HomePage() {
   );
 }
 
-// ─── Greeting Bar — avatar + "Hi, Name", click to edit in-place ────
+// Greeting Bar - avatar + "Hi, Name", click to edit in-place
 const MAX_AVATAR_SIZE = 5 * 1024 * 1024;
 
 function isCustomAvatar(src: string) {
@@ -767,7 +1110,7 @@ function GreetingBar() {
         onChange={handleAvatarUpload}
       />
 
-      {/* ── Collapsed pill (always in flow) ── */}
+      {/* Collapsed pill (always in flow) */}
       {!open && (
         <div
           className="flex items-center gap-2.5 cursor-pointer transition-all duration-200 group rounded-full px-2.5 py-1.5 border border-border/50 text-muted-foreground/70 hover:text-foreground hover:bg-muted/60 active:scale-[0.97]"
@@ -804,7 +1147,7 @@ function GreetingBar() {
         </div>
       )}
 
-      {/* ── Expanded panel (absolute, floating) ── */}
+      {/* Expanded panel (absolute, floating) */}
       <AnimatePresence>
         {open && (
           <motion.div
@@ -815,7 +1158,7 @@ function GreetingBar() {
             className="absolute left-4 top-3.5 z-50 w-64"
           >
             <div className="rounded-2xl bg-white/95 dark:bg-slate-800/95 backdrop-blur-sm ring-1 ring-black/[0.04] dark:ring-white/[0.06] shadow-[0_1px_8px_-2px_rgba(0,0,0,0.06)] dark:shadow-[0_1px_8px_-2px_rgba(0,0,0,0.3)] px-2.5 py-2">
-              {/* ── Row: avatar + name ── */}
+              {/* Row: avatar + name */}
               <div
                 className="flex items-center gap-2.5 cursor-pointer transition-all duration-200"
                 onClick={() => {
@@ -901,7 +1244,7 @@ function GreetingBar() {
                 </motion.div>
               </div>
 
-              {/* ── Expandable content ── */}
+              {/* Expandable content */}
               <div className="pt-2" onClick={(e) => e.stopPropagation()}>
                 {/* Avatar picker */}
                 <AnimatePresence>
@@ -965,7 +1308,7 @@ function GreetingBar() {
   );
 }
 
-// ─── Classroom Card — clean, minimal style ──────────────────────
+// Classroom Card - clean, minimal style
 function ClassroomCard({
   classroom,
   slide,
@@ -1001,7 +1344,7 @@ function ClassroomCard({
 
   return (
     <div className="group cursor-pointer" onClick={confirmingDelete ? undefined : onClick}>
-      {/* Thumbnail — large radius, no border, subtle bg */}
+      {/* Thumbnail - large radius, no border, subtle bg */}
       <div
         ref={thumbRef}
         className="relative w-full aspect-[16/9] rounded-2xl bg-slate-100 dark:bg-slate-800/80 overflow-hidden transition-transform duration-200 group-hover:scale-[1.02]"
@@ -1021,7 +1364,7 @@ function ClassroomCard({
           </div>
         ) : null}
 
-        {/* Delete — top-right, only on hover */}
+        {/* Delete - top-right, only on hover */}
         <AnimatePresence>
           {!confirmingDelete && (
             <motion.div
@@ -1078,12 +1421,30 @@ function ClassroomCard({
         </AnimatePresence>
       </div>
 
-      {/* Info — outside the thumbnail */}
-      <div className="mt-2.5 px-1 flex items-center gap-2">
-        <span className="shrink-0 inline-flex items-center rounded-full bg-violet-100 dark:bg-violet-900/30 px-2 py-0.5 text-[11px] font-medium text-violet-600 dark:text-violet-400">
-          {classroom.sceneCount} {t('classroom.slides')} · {formatDate(classroom.updatedAt)}
-        </span>
-        <Tooltip>
+      {/* Info - outside the thumbnail */}
+        <div className="mt-2.5 px-1 flex items-center gap-2">
+          <span className="shrink-0 inline-flex items-center rounded-full bg-violet-100 dark:bg-violet-900/30 px-2 py-0.5 text-[11px] font-medium text-violet-600 dark:text-violet-400">
+            {classroom.sceneCount} {t('classroom.slides')} · {formatDate(classroom.updatedAt)}
+          </span>
+          {classroom.knowledgeBaseCount ? (
+            <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
+              <Database className="size-3" />
+              {classroom.knowledgeBaseCount}
+            </span>
+          ) : null}
+          {classroom.memoryCount ? (
+            <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+              <Brain className="size-3" />
+              {classroom.memoryCount}
+            </span>
+          ) : null}
+          {classroom.preferKnowledgeVideos ? (
+            <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-medium text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">
+              <Film className="size-3" />
+              video
+            </span>
+          ) : null}
+          <Tooltip>
           <TooltipTrigger asChild>
             <p className="font-medium text-[15px] truncate text-foreground/90 min-w-0">
               {classroom.name}

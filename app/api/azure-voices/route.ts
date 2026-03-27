@@ -1,7 +1,9 @@
 import { NextRequest } from 'next/server';
 import { createLogger } from '@/lib/logger';
 import { validateUrlForSSRF } from '@/lib/server/ssrf-guard';
-import { apiError, apiSuccess } from '@/lib/server/api-response';
+import { apiError, apiSuccess, API_ERROR_CODES } from '@/lib/server/api-response';
+import { parseJsonRequestWithSchema } from '@/lib/server/http-validation';
+import { azureVoicesRequestSchema } from '@/lib/server/generation/contracts';
 const log = createLogger('Azure Voices');
 
 export const maxDuration = 30;
@@ -12,15 +14,11 @@ export const maxDuration = 30;
  */
 export async function POST(req: NextRequest) {
   try {
-    const { apiKey, baseUrl } = await req.json();
-
-    if (!apiKey) {
-      return apiError('MISSING_API_KEY', 400, 'API Key is required');
+    const parsed = await parseJsonRequestWithSchema(req, azureVoicesRequestSchema);
+    if (!parsed.success) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, parsed.error);
     }
-
-    if (!baseUrl) {
-      return apiError('MISSING_REQUIRED_FIELD', 400, 'Base URL is required');
-    }
+    const { apiKey, baseUrl } = parsed.data;
 
     // Validate baseUrl against SSRF
     const ssrfError = validateUrlForSSRF(baseUrl);

@@ -8,21 +8,24 @@
 import { searchWithTavily, formatSearchResultsAsContext } from '@/lib/web-search/tavily';
 import { resolveWebSearchApiKey } from '@/lib/server/provider-config';
 import { createLogger } from '@/lib/logger';
-import { apiError, apiSuccess } from '@/lib/server/api-response';
+import { z } from 'zod';
+import { apiError, apiSuccess, API_ERROR_CODES } from '@/lib/server/api-response';
+import { parseJsonRequestWithSchema } from '@/lib/server/http-validation';
 
 const log = createLogger('WebSearch');
 
+const webSearchRequestSchema = z.object({
+  query: z.string().trim().min(1),
+  apiKey: z.string().optional(),
+});
+
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const { query, apiKey: clientApiKey } = body as {
-      query?: string;
-      apiKey?: string;
-    };
-
-    if (!query || !query.trim()) {
-      return apiError('MISSING_REQUIRED_FIELD', 400, 'query is required');
+    const parsed = await parseJsonRequestWithSchema(req, webSearchRequestSchema);
+    if (!parsed.success) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, parsed.error);
     }
+    const { query, apiKey: clientApiKey } = parsed.data;
 
     const apiKey = resolveWebSearchApiKey(clientApiKey);
     if (!apiKey) {
@@ -33,7 +36,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const result = await searchWithTavily({ query: query.trim(), apiKey });
+    const result = await searchWithTavily({ query, apiKey });
     const context = formatSearchResultsAsContext(result);
 
     return apiSuccess({

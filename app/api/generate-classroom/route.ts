@@ -1,7 +1,9 @@
 import { after, type NextRequest } from 'next/server';
 import { nanoid } from 'nanoid';
-import { apiError, apiSuccess } from '@/lib/server/api-response';
+import { apiError, apiSuccess, API_ERROR_CODES } from '@/lib/server/api-response';
+import { parseJsonRequestWithSchema } from '@/lib/server/http-validation';
 import { type GenerateClassroomInput } from '@/lib/server/classroom-generation';
+import { generateClassroomRequestSchema } from '@/lib/server/generation/contracts';
 import { runClassroomGenerationJob } from '@/lib/server/classroom-job-runner';
 import { createClassroomGenerationJob } from '@/lib/server/classroom-job-store';
 import { buildRequestOrigin } from '@/lib/server/classroom-storage';
@@ -10,26 +12,12 @@ export const maxDuration = 30;
 
 export async function POST(req: NextRequest) {
   try {
-    const rawBody = (await req.json()) as Partial<GenerateClassroomInput>;
-    const body: GenerateClassroomInput = {
-      requirement: rawBody.requirement || '',
-      ...(rawBody.pdfContent ? { pdfContent: rawBody.pdfContent } : {}),
-      ...(rawBody.language ? { language: rawBody.language } : {}),
-      ...(rawBody.enableWebSearch != null ? { enableWebSearch: rawBody.enableWebSearch } : {}),
-      ...(rawBody.enableImageGeneration != null
-        ? { enableImageGeneration: rawBody.enableImageGeneration }
-        : {}),
-      ...(rawBody.enableVideoGeneration != null
-        ? { enableVideoGeneration: rawBody.enableVideoGeneration }
-        : {}),
-      ...(rawBody.enableTTS != null ? { enableTTS: rawBody.enableTTS } : {}),
-      ...(rawBody.agentMode ? { agentMode: rawBody.agentMode } : {}),
-    };
-    const { requirement } = body;
-
-    if (!requirement) {
-      return apiError('MISSING_REQUIRED_FIELD', 400, 'Missing required field: requirement');
+    const parsed = await parseJsonRequestWithSchema(req, generateClassroomRequestSchema);
+    if (!parsed.success) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, parsed.error);
     }
+
+    const body: GenerateClassroomInput = parsed.data;
 
     const baseUrl = buildRequestOrigin(req);
     const jobId = nanoid(10);

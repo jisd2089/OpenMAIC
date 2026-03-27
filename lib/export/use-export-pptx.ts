@@ -9,14 +9,21 @@ import { toast } from 'sonner';
 import { useStageStore } from '@/lib/store';
 import { useCanvasStore } from '@/lib/store/canvas';
 import { useMediaGenerationStore, isMediaPlaceholder } from '@/lib/store/media-generation';
+import { resolveKnowledgeMediaPoster, resolveKnowledgeMediaSrc } from '@/lib/kb/reference';
+import {
+  buildGenerationContextExport,
+  buildGenerationContextText,
+  buildPresentationSubject,
+} from '@/lib/export/context-export';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import type {
   Slide,
   PPTElementOutline,
   PPTElementShadow,
+  PPTTextElement,
   PPTElementLink,
 } from '@/lib/types/slides';
-import type { Scene, SlideContent } from '@/lib/types/stage';
+import type { Scene, SlideContent, Stage } from '@/lib/types/stage';
 import type { SpeechAction } from '@/lib/types/action';
 import { getElementRange, getLineElementPath, getTableSubThemeColor } from '@/lib/utils/element';
 import { type AST, toAST } from '@/lib/export/html-parser';
@@ -29,6 +36,11 @@ const log = createLogger('ExportPPTX');
 
 const DEFAULT_FONT_SIZE = 16;
 const DEFAULT_FONT_FAMILY = 'Microsoft YaHei';
+const MAX_SCENE_RETRIEVAL_NOTES_CHARS = 1200;
+const TEXT_ELEMENT_PADDING_PX = 10;
+const TEXT_COLLISION_GAP_PX = 12;
+const LEGACY_UNORDERED_BULLET_RE = /^[\u2022\u2023\u25E6\u2043\u2219]\s*/;
+const LEGACY_ORDERED_BULLET_RE = /^(\d+)[.)]\s+/;
 
 // ── Color formatting ──
 
@@ -100,7 +112,7 @@ function formatHTML(html: string, ratioPx2Pt: number) {
       if ('tagName' in item && item.tagName === 'br') {
         slices.push({ text: '', options: { breakLine: true } });
       } else if ('content' in item) {
-        const text = item.content
+        let text = item.content
           .replace(/&nbsp;/g, ' ')
           .replace(/&gt;/g, '>')
           .replace(/&lt;/g, '<')
@@ -149,6 +161,23 @@ function formatHTML(html: string, ratioPx2Pt: number) {
         if (styleObj['font-family']) options.fontFace = styleObj['font-family'];
         if (styleObj['href']) options.hyperlink = { url: styleObj['href'] };
 
+        const orderedBulletMatch = text.match(LEGACY_ORDERED_BULLET_RE);
+        const hasLegacyUnorderedBullet = LEGACY_UNORDERED_BULLET_RE.test(text);
+        if (!bulletFlag && orderedBulletMatch) {
+          text = text.replace(LEGACY_ORDERED_BULLET_RE, '');
+          options.bullet = {
+            type: 'number',
+            indent: (options.fontSize || DEFAULT_FONT_SIZE) * 1.25,
+          };
+          options.paraSpaceBefore = 0.1;
+        } else if (!bulletFlag && hasLegacyUnorderedBullet) {
+          text = text.replace(LEGACY_UNORDERED_BULLET_RE, '');
+          options.bullet = {
+            indent: (options.fontSize || DEFAULT_FONT_SIZE) * 1.25,
+          };
+          options.paraSpaceBefore = 0.1;
+        }
+
         if (bulletFlag && styleObj['list-type'] === 'ol') {
           options.bullet = {
             type: 'number',
@@ -175,6 +204,344 @@ function formatHTML(html: string, ratioPx2Pt: number) {
   };
   parse(ast);
   return slices;
+}
+
+function measureTextElementHeightPx(element: PPTTextElement): number {
+  if (typeof document === 'undefined' || element.vertical) {
+    return element.height;
+  }
+
+  const probe = document.createElement('div');
+  probe.style.position = 'fixed';
+  probe.style.left = '-100000px';
+  probe.style.top = '0';
+  probe.style.visibility = 'hidden';
+  probe.style.pointerEvents = 'none';
+  probe.style.boxSizing = 'border-box';
+  probe.style.width = `${element.width}px`;
+  probe.style.padding = `${TEXT_ELEMENT_PADDING_PX}px`;
+  probe.style.lineHeight = `${element.lineHeight ?? 1.5}`;
+  probe.style.letterSpacing = `${element.wordSpace || 0}px`;
+  probe.style.fontFamily = element.defaultFontName || DEFAULT_FONT_FAMILY;
+  probe.style.fontSize = `${DEFAULT_FONT_SIZE}px`;
+  probe.style.color = element.defaultColor || '#000000';
+  probe.style.whiteSpace = 'normal';
+  probe.style.wordBreak = 'break-word';
+  probe.style.overflowWrap = 'break-word';
+  probe.innerHTML = `
+    <style>
+      .pptx-export-probe p { margin: 0 0 ${element.paragraphSpace === undefined ? 5 : element.paragraphSpace}px 0; }
+      .pptx-export-probe ul, .pptx-export-probe ol { margin: 0 0 ${element.paragraphSpace === undefined ? 5 : element.paragraphSpace}px 0; padding-left: 1.5em; }
+      .pptx-export-probe li { margin: 0; }
+    </style>
+    <div class="pptx-export-probe">${element.content}</div>
+  `;
+
+  document.body.appendChild(probe);
+  const measuredHeight = Math.ceil(probe.getBoundingClientRect().height);
+  document.body.removeChild(probe);
+  return Math.max(element.height, measuredHeight);
+}
+
+function rangesOverlap(startA: number, endA: number, startB: number, endB: number): boolean {
+  return Math.max(startA, startB) < Math.min(endA, endB);
+}
+
+function getTextElementExportHeightPx(input: {
+  element: PPTTextElement;
+  slide: Slide;
+  measuredHeightPx: number;
+  topPx: number;
+  viewportHeightPx: number;
+}): number {
+  const { element, slide, measuredHeightPx, topPx, viewportHeightPx } = input;
+  const pageBottomLimit = Math.max(20, viewportHeightPx - topPx);
+  const elementLeft = element.left;
+  const elementRight = element.left + element.width;
+
+  let collisionLimit = pageBottomLimit;
+  for (const candidate of slide.elements || []) {
+    if (candidate.id === element.id) continue;
+    if (candidate.top <= topPx) continue;
+
+    const candidateLeft = candidate.left;
+    const candidateRight = candidate.left + candidate.width;
+    if (!rangesOverlap(elementLeft, elementRight, candidateLeft, candidateRight)) continue;
+
+    const availableHeight = candidate.top - topPx - TEXT_COLLISION_GAP_PX;
+    if (availableHeight > 0) {
+      collisionLimit = Math.min(collisionLimit, availableHeight);
+    }
+  }
+
+  return Math.max(20, Math.min(Math.max(element.height, measuredHeightPx), collisionLimit));
+}
+
+type TextExportLayout = {
+  topPx: number;
+  heightPx: number;
+  measuredHeightPx: number;
+};
+
+type TextExportSegment = {
+  topPx: number;
+  heightPx: number;
+};
+
+type TextExportBox = {
+  topPx: number;
+  heightPx: number;
+  content: string;
+  measuredHeightPx: number;
+};
+
+function buildTextExportLayoutMap(slide: Slide, viewportHeightPx: number): Map<string, TextExportLayout> {
+  const layoutMap = new Map<string, TextExportLayout>();
+  const textElements = (slide.elements || [])
+    .filter((element): element is PPTTextElement => element.type === 'text')
+    .sort((left, right) => left.top - right.top || left.left - right.left);
+
+  for (const element of textElements) {
+    const measuredHeightPx = measureTextElementHeightPx(element);
+    let topPx = element.top;
+
+    for (const [otherId, otherLayout] of layoutMap.entries()) {
+      const other = textElements.find((candidate) => candidate.id === otherId);
+      if (!other) continue;
+      if (!rangesOverlap(element.left, element.left + element.width, other.left, other.left + other.width)) {
+        continue;
+      }
+
+      const otherBottom = otherLayout.topPx + otherLayout.heightPx;
+      if (otherBottom + TEXT_COLLISION_GAP_PX > topPx) {
+        topPx = otherBottom + TEXT_COLLISION_GAP_PX;
+      }
+    }
+
+    const heightPx = getTextElementExportHeightPx({
+      element,
+      slide,
+      measuredHeightPx,
+      topPx,
+      viewportHeightPx,
+    });
+
+    layoutMap.set(element.id, {
+      topPx,
+      heightPx,
+      measuredHeightPx,
+    });
+  }
+
+  return layoutMap;
+}
+
+function measureTextHtmlHeightPx(element: PPTTextElement, html: string): number {
+  return measureTextElementHeightPx({
+    ...element,
+    content: html,
+  });
+}
+
+function splitTextContentIntoBlocks(html: string): string[] {
+  if (typeof DOMParser === 'undefined') return [html];
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${html}</div>`, 'text/html');
+  const root = doc.body.firstElementChild;
+  if (!root) return [html];
+
+  const blocks: string[] = [];
+  for (const node of Array.from(root.childNodes)) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent?.trim();
+      if (text) blocks.push(`<p>${text}</p>`);
+      continue;
+    }
+    if (!(node instanceof HTMLElement)) continue;
+
+    if (node.tagName === 'UL' || node.tagName === 'OL') {
+      const tagName = node.tagName.toLowerCase();
+      const items = Array.from(node.children).filter(
+        (child): child is HTMLLIElement => child instanceof HTMLLIElement,
+      );
+      if (items.length === 0) {
+        blocks.push(node.outerHTML);
+        continue;
+      }
+      for (const item of items) {
+        blocks.push(`<${tagName}>${item.outerHTML}</${tagName}>`);
+      }
+      continue;
+    }
+
+    blocks.push(node.outerHTML);
+  }
+
+  return blocks.length > 0 ? blocks : [html];
+}
+
+function buildTextExportSegments(input: {
+  element: PPTTextElement;
+  slide: Slide;
+  textExportLayoutMap: Map<string, TextExportLayout>;
+  viewportHeightPx: number;
+}): TextExportSegment[] {
+  const { element, slide, textExportLayoutMap, viewportHeightPx } = input;
+  const currentLayout = textExportLayoutMap.get(element.id) ?? {
+    topPx: element.top,
+    heightPx: element.height,
+    measuredHeightPx: element.height,
+  };
+
+  const elementLeft = element.left;
+  const elementRight = element.left + element.width;
+  const obstacles = (slide.elements || [])
+    .filter((candidate) => candidate.id !== element.id)
+    .filter((candidate) =>
+      rangesOverlap(elementLeft, elementRight, candidate.left, candidate.left + candidate.width),
+    )
+    .map((candidate) => {
+      if (candidate.type === 'text') {
+        const layout = textExportLayoutMap.get(candidate.id);
+        if (layout) {
+          return {
+            topPx: layout.topPx,
+            bottomPx: layout.topPx + layout.heightPx,
+          };
+        }
+      }
+      return {
+        topPx: candidate.top,
+        bottomPx: candidate.top + ('height' in candidate ? candidate.height : 0),
+      };
+    })
+    .filter((candidate) => candidate.bottomPx > currentLayout.topPx)
+    .sort((left, right) => left.topPx - right.topPx);
+
+  const segments: TextExportSegment[] = [];
+  let cursorTop = currentLayout.topPx;
+  for (const obstacle of obstacles) {
+    if (obstacle.bottomPx <= cursorTop) continue;
+
+    const availableHeight = obstacle.topPx - cursorTop - TEXT_COLLISION_GAP_PX;
+    if (availableHeight > 20) {
+      segments.push({
+        topPx: cursorTop,
+        heightPx: availableHeight,
+      });
+    }
+    cursorTop = Math.max(cursorTop, obstacle.bottomPx + TEXT_COLLISION_GAP_PX);
+    if (cursorTop >= viewportHeightPx - 20) break;
+  }
+
+  if (cursorTop < viewportHeightPx - 20) {
+    segments.push({
+      topPx: cursorTop,
+      heightPx: viewportHeightPx - cursorTop,
+    });
+  }
+
+  return segments.length > 0
+    ? segments
+    : [
+        {
+          topPx: currentLayout.topPx,
+          heightPx: Math.max(20, viewportHeightPx - currentLayout.topPx),
+        },
+      ];
+}
+
+function buildTextExportBoxes(input: {
+  element: PPTTextElement;
+  slide: Slide;
+  textExportLayoutMap: Map<string, TextExportLayout>;
+  viewportHeightPx: number;
+}): TextExportBox[] {
+  const { element, slide, textExportLayoutMap, viewportHeightPx } = input;
+  const baseLayout = textExportLayoutMap.get(element.id) ?? {
+    topPx: element.top,
+    heightPx: element.height,
+    measuredHeightPx: element.height,
+  };
+
+  if (baseLayout.measuredHeightPx <= baseLayout.heightPx) {
+    return [
+      {
+        topPx: baseLayout.topPx,
+        heightPx: baseLayout.heightPx,
+        content: element.content,
+        measuredHeightPx: baseLayout.measuredHeightPx,
+      },
+    ];
+  }
+
+  const segments = buildTextExportSegments({
+    element,
+    slide,
+    textExportLayoutMap,
+    viewportHeightPx,
+  });
+  const blocks = splitTextContentIntoBlocks(element.content);
+  if (blocks.length <= 1) {
+    return [
+      {
+        topPx: baseLayout.topPx,
+        heightPx: baseLayout.heightPx,
+        content: element.content,
+        measuredHeightPx: baseLayout.measuredHeightPx,
+      },
+    ];
+  }
+
+  const boxes: TextExportBox[] = [];
+  let blockIndex = 0;
+  for (const segment of segments) {
+    if (blockIndex >= blocks.length) break;
+
+    const chunkBlocks: string[] = [];
+    let chunkHtml = '';
+    while (blockIndex < blocks.length) {
+      const nextBlocks = [...chunkBlocks, blocks[blockIndex]];
+      const nextHtml = nextBlocks.join('');
+      const nextHeight = measureTextHtmlHeightPx(element, nextHtml);
+      if (nextHeight <= segment.heightPx || chunkBlocks.length === 0) {
+        chunkBlocks.push(blocks[blockIndex]);
+        chunkHtml = nextHtml;
+        blockIndex += 1;
+        if (nextHeight > segment.heightPx) break;
+        continue;
+      }
+      break;
+    }
+
+    if (!chunkHtml) continue;
+    boxes.push({
+      topPx: segment.topPx,
+      heightPx: segment.heightPx,
+      content: chunkHtml,
+      measuredHeightPx: measureTextHtmlHeightPx(element, chunkHtml),
+    });
+  }
+
+  if (boxes.length === 0) {
+    return [
+      {
+        topPx: baseLayout.topPx,
+        heightPx: baseLayout.heightPx,
+        content: element.content,
+        measuredHeightPx: baseLayout.measuredHeightPx,
+      },
+    ];
+  }
+
+  if (blockIndex < blocks.length) {
+    const lastBox = boxes[boxes.length - 1];
+    lastBox.content += blocks.slice(blockIndex).join('');
+    lastBox.measuredHeightPx = measureTextHtmlHeightPx(element, lastBox.content);
+  }
+
+  return boxes;
 }
 
 // ── SVG path → pptxgenjs points ──
@@ -359,7 +726,32 @@ function buildSpeakerNotes(scene: Scene): string {
   return parts.join('\n');
 }
 
-async function buildPptxBlob(
+function buildSceneGenerationNotes(scene: Scene): string {
+  if (!scene.generationContext) return '';
+
+  const parts: string[] = [];
+  const retrievalContext = scene.generationContext.retrievalContext?.trim();
+  if (retrievalContext) {
+    const normalized =
+      retrievalContext.length > MAX_SCENE_RETRIEVAL_NOTES_CHARS
+        ? `${retrievalContext.slice(0, MAX_SCENE_RETRIEVAL_NOTES_CHARS).trim()}...`
+        : retrievalContext;
+    parts.push(`Retrieved Context\n${normalized}`);
+  }
+
+  if (scene.generationContext.knowledgeVideoReferences?.length) {
+    parts.push(
+      `Knowledge Video Candidates\n${scene.generationContext.knowledgeVideoReferences
+        .map((item) => `- ${item.filename}`)
+        .join('\n')}`,
+    );
+  }
+
+  return parts.join('\n\n');
+}
+
+export async function buildPptxBlob(
+  stage: Stage | null,
   slides: Slide[],
   slideScenes: Scene[],
   viewportRatio: number,
@@ -368,6 +760,12 @@ async function buildPptxBlob(
   ratioPx2Pt: number,
 ): Promise<Blob> {
   const pptx = new pptxgen();
+  const generationContextText = buildGenerationContextText(stage);
+
+  pptx.author = 'OpenMAIC';
+  pptx.company = 'OpenMAIC';
+  pptx.title = stage?.name || 'OpenMAIC Presentation';
+  pptx.subject = buildPresentationSubject(stage);
 
   // Set layout based on aspect ratio
   if (viewportRatio === 0.625) pptx.layout = 'LAYOUT_16x10';
@@ -377,13 +775,20 @@ async function buildPptxBlob(
   for (let slideIdx = 0; slideIdx < slides.length; slideIdx++) {
     const slide = slides[slideIdx];
     const pptxSlide = pptx.addSlide();
+    const textExportLayoutMap = buildTextExportLayoutMap(slide, viewportSize * viewportRatio);
 
-    // ── Speaker Notes ──
-    const scene = slideScenes[slideIdx];
-    if (scene) {
-      const notes = buildSpeakerNotes(scene);
-      if (notes) pptxSlide.addNotes(notes);
-    }
+      // ── Speaker Notes ──
+      const scene = slideScenes[slideIdx];
+      if (scene) {
+        const notes = [buildSceneGenerationNotes(scene), buildSpeakerNotes(scene)]
+          .filter(Boolean)
+          .join('\n\n');
+        const contextualNotes =
+          slideIdx === 0 && generationContextText
+            ? [generationContextText, notes].filter(Boolean).join('\n\n')
+            : notes;
+        if (contextualNotes) pptxSlide.addNotes(contextualNotes);
+      }
 
     // ── Background ──
     if (slide.background) {
@@ -427,48 +832,58 @@ async function buildPptxBlob(
     for (const el of slide.elements) {
       // ── TEXT ──
       if (el.type === 'text') {
-        const textProps = formatHTML(el.content, ratioPx2Pt);
-        const options: pptxgen.TextPropsOptions = {
-          x: el.left / ratioPx2Inch,
-          y: el.top / ratioPx2Inch,
-          w: el.width / ratioPx2Inch,
-          h: el.height / ratioPx2Inch,
-          fontSize: DEFAULT_FONT_SIZE / ratioPx2Pt,
-          fontFace: el.defaultFontName || DEFAULT_FONT_FAMILY,
-          color: '#000000',
-          valign: 'top',
-          margin: 10 / ratioPx2Pt,
-          paraSpaceBefore: 5 / ratioPx2Pt,
-          lineSpacingMultiple: 1.5 / 1.25,
-          autoFit: true,
-        };
-        if (el.rotate) options.rotate = el.rotate;
-        if (el.wordSpace) options.charSpacing = el.wordSpace / ratioPx2Pt;
-        if (el.lineHeight) options.lineSpacingMultiple = el.lineHeight / 1.25;
-        if (el.fill) {
-          const c = formatColor(el.fill);
-          const opacity = el.opacity === undefined ? 1 : el.opacity;
-          options.fill = {
-            color: c.color,
-            transparency: (1 - c.alpha * opacity) * 100,
-          };
-        }
-        if (el.defaultColor) options.color = formatColor(el.defaultColor).color;
-        if (el.defaultFontName) options.fontFace = el.defaultFontName;
-        if (el.shadow) options.shadow = getShadowOption(el.shadow, ratioPx2Pt);
-        if (el.outline?.width) options.line = getOutlineOption(el.outline, ratioPx2Pt);
-        if (el.opacity !== undefined) options.transparency = (1 - el.opacity) * 100;
-        if (el.paragraphSpace !== undefined)
-          options.paraSpaceBefore = el.paragraphSpace / ratioPx2Pt;
-        if (el.vertical) options.vert = 'eaVert';
+        const exportBoxes = buildTextExportBoxes({
+          element: el,
+          slide,
+          textExportLayoutMap,
+          viewportHeightPx: viewportSize * viewportRatio,
+        });
 
-        pptxSlide.addText(textProps, options);
+        for (const box of exportBoxes) {
+          const textProps = formatHTML(box.content, ratioPx2Pt);
+          const options: pptxgen.TextPropsOptions = {
+            x: el.left / ratioPx2Inch,
+            y: box.topPx / ratioPx2Inch,
+            w: el.width / ratioPx2Inch,
+            h: box.heightPx / ratioPx2Inch,
+            fontSize: DEFAULT_FONT_SIZE / ratioPx2Pt,
+            fontFace: el.defaultFontName || DEFAULT_FONT_FAMILY,
+            color: '#000000',
+            valign: 'top',
+            margin: 10 / ratioPx2Pt,
+            paraSpaceBefore: 5 / ratioPx2Pt,
+            lineSpacingMultiple: 1.5 / 1.25,
+            fit: box.measuredHeightPx > box.heightPx ? 'shrink' : 'none',
+          };
+          if (el.rotate) options.rotate = el.rotate;
+          if (el.wordSpace) options.charSpacing = el.wordSpace / ratioPx2Pt;
+          if (el.lineHeight) options.lineSpacingMultiple = el.lineHeight / 1.25;
+          if (el.fill) {
+            const c = formatColor(el.fill);
+            const opacity = el.opacity === undefined ? 1 : el.opacity;
+            options.fill = {
+              color: c.color,
+              transparency: (1 - c.alpha * opacity) * 100,
+            };
+          }
+          if (el.defaultColor) options.color = formatColor(el.defaultColor).color;
+          if (el.defaultFontName) options.fontFace = el.defaultFontName;
+          if (el.shadow) options.shadow = getShadowOption(el.shadow, ratioPx2Pt);
+          if (el.outline?.width)
+            options.line = getOutlineOption(el.outline, ratioPx2Pt);
+          if (el.opacity !== undefined) options.transparency = (1 - el.opacity) * 100;
+          if (el.paragraphSpace !== undefined)
+            options.paraSpaceBefore = el.paragraphSpace / ratioPx2Pt;
+          if (el.vertical) options.vert = 'eaVert';
+
+          pptxSlide.addText(textProps, options);
+        }
       }
 
       // ── IMAGE ──
       else if (el.type === 'image') {
         // Resolve placeholder src → actual image data
-        let resolvedSrc = el.src;
+        let resolvedSrc = resolveKnowledgeMediaSrc(el.src);
         if (isMediaPlaceholder(el.src)) {
           const task = useMediaGenerationStore.getState().tasks[el.src];
           if (task?.status === 'done' && task.objectUrl) {
@@ -950,7 +1365,7 @@ async function buildPptxBlob(
       // ── VIDEO / AUDIO ──
       else if (el.type === 'video' || el.type === 'audio') {
         // Resolve placeholder src → blob URL from media generation store
-        let resolvedSrc = el.src;
+        let resolvedSrc = resolveKnowledgeMediaSrc(el.src);
         if (isMediaPlaceholder(el.src)) {
           const task = useMediaGenerationStore.getState().tasks[el.src];
           if (task?.status === 'done' && task.objectUrl) {
@@ -992,7 +1407,10 @@ async function buildPptxBlob(
             let coverBase64: string | undefined;
 
             // 1. Try poster from element or media generation store
-            let posterUrl = 'poster' in el && el.poster ? el.poster : undefined;
+            let posterUrl = resolveKnowledgeMediaPoster(
+              el.src,
+              'poster' in el && el.poster ? el.poster : undefined,
+            );
             if (!posterUrl && isMediaPlaceholder(el.src)) {
               const task = useMediaGenerationStore.getState().tasks[el.src];
               if (task?.poster) posterUrl = task.poster;
@@ -1108,6 +1526,7 @@ export function useExportPPTX() {
     withExportGuard(async () => {
       const fileName = stage?.name || 'slides';
       const blob = await buildPptxBlob(
+        stage,
         slides,
         slideScenes,
         viewportRatio,
@@ -1139,6 +1558,7 @@ export function useExportPPTX() {
 
       // 1. Generate PPTX
       const pptxBlob = await buildPptxBlob(
+        stage,
         slides,
         slideScenes,
         viewportRatio,
@@ -1159,7 +1579,13 @@ export function useExportPPTX() {
         }
       }
 
-      // 3. Download ZIP
+      // 3. Add structured generation context
+      zip.file(
+        'context.json',
+        JSON.stringify(buildGenerationContextExport(stage, scenes), null, 2),
+      );
+
+      // 4. Download ZIP
       const zipBlob = await zip.generateAsync({ type: 'blob' });
       saveAs(zipBlob, `${fileName}.zip`);
       toast.success(t('export.exportSuccess'));
@@ -1177,5 +1603,16 @@ export function useExportPPTX() {
     t,
   ]);
 
-  return { exporting, exportPPTX, exportResourcePack };
+  const exportContextJson = useCallback(() => {
+    withExportGuard(async () => {
+      const fileName = stage?.name || 'slides';
+      const contextBlob = new Blob([JSON.stringify(buildGenerationContextExport(stage, scenes), null, 2)], {
+        type: 'application/json;charset=utf-8',
+      });
+      saveAs(contextBlob, `${fileName}.context.json`);
+      toast.success(t('export.exportSuccess'));
+    });
+  }, [withExportGuard, stage, scenes, t]);
+
+  return { exporting, exportPPTX, exportResourcePack, exportContextJson };
 }

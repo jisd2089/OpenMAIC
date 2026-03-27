@@ -146,6 +146,129 @@ import { createLogger } from '@/lib/logger';
 
 const log = createLogger('PDFProviders');
 
+type PdfPageText = {
+  pageNumber: number;
+  text: string;
+};
+
+function normalizePageTexts(raw: unknown, pageCount: number): PdfPageText[] {
+  if (!raw) return [];
+
+  if (Array.isArray(raw)) {
+    return raw
+      .map((entry, index) => {
+        if (typeof entry === 'string') {
+          return { pageNumber: index + 1, text: entry.trim() };
+        }
+        if (entry && typeof entry === 'object') {
+          const record = entry as Record<string, unknown>;
+          const text =
+            typeof record.text === 'string'
+              ? record.text
+              : typeof record.content === 'string'
+                ? record.content
+                : '';
+          const pageNumber =
+            typeof record.pageNumber === 'number'
+              ? record.pageNumber
+              : typeof record.page === 'number'
+                ? record.page
+                : index + 1;
+          return { pageNumber, text: text.trim() };
+        }
+        return null;
+      })
+      .filter((entry): entry is PdfPageText => Boolean(entry?.text));
+  }
+
+  if (typeof raw === 'object') {
+    const record = raw as Record<string, unknown>;
+    const nested = record.pages ?? record.texts ?? record.items;
+    if (nested) return normalizePageTexts(nested, pageCount);
+    if (typeof record.text === 'string') {
+      return [{ pageNumber: 1, text: record.text.trim() }];
+    }
+  }
+
+  if (typeof raw === 'string' && raw.trim()) {
+    return [
+      {
+        pageNumber: pageCount > 0 ? 1 : 1,
+        text: raw.trim(),
+      },
+    ];
+  }
+
+  return [];
+}
+
+function extractMinerUTextFromItem(item: Record<string, unknown>): string {
+  const segments: string[] = [];
+
+  if (typeof item.text === 'string') segments.push(item.text);
+  if (typeof item.content === 'string') segments.push(item.content);
+  if (typeof item.md === 'string') segments.push(item.md);
+  if (typeof item.latex === 'string') segments.push(item.latex);
+  if (Array.isArray(item.image_caption)) {
+    segments.push(
+      ...item.image_caption.filter((value): value is string => typeof value === 'string'),
+    );
+  }
+  if (Array.isArray(item.table_caption)) {
+    segments.push(
+      ...item.table_caption.filter((value): value is string => typeof value === 'string'),
+    );
+  }
+
+  return segments
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
+function buildMinerUPageTexts(
+  contentList: unknown,
+  markdown: string,
+  pageCount: number,
+): PdfPageText[] {
+  if (!Array.isArray(contentList)) {
+    return markdown.trim() ? [{ pageNumber: 1, text: markdown.trim() }] : [];
+  }
+
+  const pageMap = new Map<number, string[]>();
+  for (const item of contentList) {
+    if (!item || typeof item !== 'object') continue;
+    const record = item as Record<string, unknown>;
+    const pageNumber =
+      typeof record.page_idx === 'number'
+        ? record.page_idx + 1
+        : typeof record.pageNumber === 'number'
+          ? record.pageNumber
+          : typeof record.page === 'number'
+            ? record.page
+            : 1;
+    const text = extractMinerUTextFromItem(record);
+    if (!text) continue;
+    const bucket = pageMap.get(pageNumber) ?? [];
+    bucket.push(text);
+    pageMap.set(pageNumber, bucket);
+  }
+
+  const pageTexts = Array.from(pageMap.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([pageNumber, segments]) => ({
+      pageNumber,
+      text: segments.join('\n').trim(),
+    }))
+    .filter((entry) => entry.text);
+
+  if (pageTexts.length > 0) return pageTexts;
+  if (markdown.trim()) {
+    return [{ pageNumber: pageCount > 0 ? 1 : 1, text: markdown.trim() }];
+  }
+  return [];
+}
+
 /**
  * Parse PDF using specified provider
  */
@@ -196,10 +319,23 @@ async function parseWithUnpdf(pdfBuffer: Buffer): Promise<ParsedPdfContent> {
   const pdf = await getDocumentProxy(uint8Array);
   const numPages = pdf.numPages;
 
-  // Extract text using the document proxy
-  const { text: pdfText } = await extractText(pdf, {
+  const { text: mergedText } = await extractText(pdf, {
     mergePages: true,
   });
+  let pageTexts: PdfPageText[] = [];
+  try {
+    const pageTextResult = await extractText(pdf, {
+      mergePages: false,
+    } as { mergePages: false });
+    pageTexts = normalizePageTexts(pageTextResult?.text, numPages);
+  } catch (error) {
+    log.warn('[unpdf] Failed to keep per-page text boundaries, falling back to merged text.', error);
+  }
+
+  const pdfText =
+    pageTexts.length > 0
+      ? pageTexts.map((entry) => entry.text).filter(Boolean).join('\n\n')
+      : mergedText;
 
   // Extract images using the same document proxy
   const images: string[] = [];
@@ -252,12 +388,14 @@ async function parseWithUnpdf(pdfBuffer: Buffer): Promise<ParsedPdfContent> {
 
   return {
     text: pdfText,
+    pageTexts,
     images,
     metadata: {
       pageCount: numPages,
       parser: 'unpdf',
       imageMapping: Object.fromEntries(pdfImagesMeta.map((m) => [m.id, m.src])),
       pdfImages: pdfImagesMeta,
+      pageTexts,
     },
   };
 }
@@ -391,6 +529,7 @@ function extractMinerUResult(fileResult: Record<string, unknown>): ParsedPdfCont
       }
     }
   }
+  const pageTexts = buildMinerUPageTexts(contentList, markdown, pageCount);
 
   // Build image mapping and pdfImages array
   const imageMapping: Record<string, string> = {};
@@ -427,12 +566,14 @@ function extractMinerUResult(fileResult: Record<string, unknown>): ParsedPdfCont
 
   return {
     text: markdown,
+    pageTexts,
     images,
     metadata: {
       pageCount,
       parser: 'mineru',
       imageMapping,
       pdfImages,
+      pageTexts,
     },
   };
 }

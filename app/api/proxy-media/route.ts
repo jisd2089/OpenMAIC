@@ -13,8 +13,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { validateUrlForSSRF } from '@/lib/server/ssrf-guard';
-import { apiError } from '@/lib/server/api-response';
+import { apiError, API_ERROR_CODES } from '@/lib/server/api-response';
 import { createLogger } from '@/lib/logger';
+import { parseJsonRequestWithSchema } from '@/lib/server/http-validation';
+import { proxyMediaRequestSchema } from '@/lib/server/generation/contracts';
 
 const log = createLogger('ProxyMedia');
 
@@ -22,11 +24,11 @@ export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
   try {
-    const { url } = await request.json();
-
-    if (!url || typeof url !== 'string') {
-      return apiError('MISSING_REQUIRED_FIELD', 400, 'Missing or invalid url');
+    const parsed = await parseJsonRequestWithSchema(request, proxyMediaRequestSchema);
+    if (!parsed.success) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, parsed.error);
     }
+    const { url } = parsed.data;
 
     // Block local/private network URLs to prevent SSRF
     const ssrfError = validateUrlForSSRF(url);

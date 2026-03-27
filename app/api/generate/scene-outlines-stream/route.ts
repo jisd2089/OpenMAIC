@@ -31,8 +31,12 @@ import type {
   ImageMapping,
 } from '@/lib/types/generation';
 import { apiError } from '@/lib/server/api-response';
+import { API_ERROR_CODES } from '@/lib/server/api-response';
 import { createLogger } from '@/lib/logger';
+import { parseJsonRequestWithSchema } from '@/lib/server/http-validation';
 import { resolveModelFromHeaders } from '@/lib/server/resolve-model';
+import { sceneOutlinesStreamRequestSchema } from '@/lib/server/generation/contracts';
+import { buildGenerationRetrievalContext } from '@/lib/server/generation-retrieval';
 const log = createLogger('Outlines Stream');
 
 export const maxDuration = 300;
@@ -85,7 +89,7 @@ function extractNewOutlines(buffer: string, alreadyParsed: number): SceneOutline
             const obj = JSON.parse(stripped.substring(objectStart, i + 1));
             results.push(obj);
           } catch {
-            // Incomplete or invalid JSON — skip
+            // Incomplete or invalid JSON - skip
           }
         }
         objectStart = -1;
@@ -98,30 +102,63 @@ function extractNewOutlines(buffer: string, alreadyParsed: number): SceneOutline
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const parsed = await parseJsonRequestWithSchema(req, sceneOutlinesStreamRequestSchema);
+    if (!parsed.success) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, parsed.error);
+    }
+
+    const body = parsed.data;
 
     // Get API configuration from request headers
     const { model: languageModel, modelInfo, modelString } = resolveModelFromHeaders(req);
 
-    if (!body.requirements) {
-      return apiError('MISSING_REQUIRED_FIELD', 400, 'Requirements are required');
-    }
-
-    const { requirements, pdfText, pdfImages, imageMapping, researchContext, agents } = body as {
+    const {
+      requirements,
+      pdfText,
+      pdfImages,
+      imageMapping,
+      researchContext,
+      agents,
+      knowledgeBaseIds,
+      memoryIds,
+      scopeId,
+      enableKnowledgeRetrieval,
+      enableMemoryRetrieval,
+      preferKnowledgeVideos,
+    } = body as {
       requirements: UserRequirements;
       pdfText?: string;
       pdfImages?: PdfImage[];
       imageMapping?: ImageMapping;
       researchContext?: string;
       agents?: AgentInfo[];
+      knowledgeBaseIds?: string[];
+      memoryIds?: string[];
+      scopeId?: string;
+      enableKnowledgeRetrieval?: boolean;
+      enableMemoryRetrieval?: boolean;
+      preferKnowledgeVideos?: boolean;
     };
+
+    const retrievalContext = await buildGenerationRetrievalContext({
+      query: requirements.requirement,
+      scopeId,
+      knowledgeBaseIds,
+      memoryIds,
+      enableKnowledgeRetrieval,
+      enableMemoryRetrieval,
+      preferKnowledgeVideos,
+    });
+    const mergedResearchContext = retrievalContext
+      ? [researchContext, retrievalContext].filter(Boolean).join('\n\n')
+      : researchContext;
 
     // Detect vision capability
     const hasVision = !!modelInfo?.capabilities?.vision;
 
     // Build prompt (same logic as generateSceneOutlinesFromRequirements)
     let availableImagesText =
-      requirements.language === 'zh-CN' ? '无可用图片' : 'No images available';
+      requirements.language === 'zh-CN' ? '\u65e0\u53ef\u7528\u56fe\u7247' : 'No images available';
     let visionImages: Array<{ id: string; src: string }> | undefined;
 
     if (pdfImages && pdfImages.length > 0) {
@@ -178,10 +215,10 @@ export async function POST(req: NextRequest) {
       pdfContent: pdfText
         ? pdfText.substring(0, MAX_PDF_CONTENT_CHARS)
         : requirements.language === 'zh-CN'
-          ? '无'
+          ? '\u65e0'
           : 'None',
       availableImages: availableImagesText,
-      researchContext: researchContext || (requirements.language === 'zh-CN' ? '无' : 'None'),
+      researchContext: mergedResearchContext || (requirements.language === 'zh-CN' ? '\u65e0' : 'None'),
       mediaGenerationPolicy,
       teacherContext,
     });
@@ -278,7 +315,7 @@ export async function POST(req: NextRequest) {
               // Validate: got outlines?
               if (parsedOutlines.length > 0) break;
 
-              // Empty result — retry if we have attempts left
+              // Empty result - retry if we have attempts left
               lastError = fullText.trim()
                 ? 'LLM response could not be parsed into outlines'
                 : 'LLM returned empty response';

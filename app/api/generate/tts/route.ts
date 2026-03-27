@@ -12,7 +12,9 @@ import { generateTTS } from '@/lib/audio/tts-providers';
 import { resolveTTSApiKey, resolveTTSBaseUrl } from '@/lib/server/provider-config';
 import type { TTSProviderId } from '@/lib/audio/types';
 import { createLogger } from '@/lib/logger';
-import { apiError, apiSuccess } from '@/lib/server/api-response';
+import { apiError, apiSuccess, API_ERROR_CODES } from '@/lib/server/api-response';
+import { parseJsonRequestWithSchema } from '@/lib/server/http-validation';
+import { ttsGenerationRequestSchema } from '@/lib/server/generation/contracts';
 import { validateUrlForSSRF } from '@/lib/server/ssrf-guard';
 
 const log = createLogger('TTS API');
@@ -21,7 +23,12 @@ export const maxDuration = 30;
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const parsed = await parseJsonRequestWithSchema(req, ttsGenerationRequestSchema);
+    if (!parsed.success) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, parsed.error);
+    }
+
+    const body = parsed.data;
     const { text, audioId, ttsProviderId, ttsVoice, ttsSpeed, ttsApiKey, ttsBaseUrl } = body as {
       text: string;
       audioId: string;
@@ -31,15 +38,6 @@ export async function POST(req: NextRequest) {
       ttsApiKey?: string;
       ttsBaseUrl?: string;
     };
-
-    // Validate required fields
-    if (!text || !audioId || !ttsProviderId || !ttsVoice) {
-      return apiError(
-        'MISSING_REQUIRED_FIELD',
-        400,
-        'Missing required fields: text, audioId, ttsProviderId, ttsVoice',
-      );
-    }
 
     // Reject browser-native TTS — must be handled client-side
     if (ttsProviderId === 'browser-native-tts') {

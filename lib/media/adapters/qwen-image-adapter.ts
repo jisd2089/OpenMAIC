@@ -17,7 +17,7 @@ import type {
   ImageGenerationResult,
 } from '../types';
 
-const DEFAULT_MODEL = 'qwen-image-max';
+const DEFAULT_MODEL = 'qwen-image-2.0-pro';
 const DEFAULT_BASE_URL = 'https://dashscope.aliyuncs.com';
 
 /**

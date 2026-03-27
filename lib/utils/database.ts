@@ -1,5 +1,11 @@
 import Dexie, { type EntityTable } from 'dexie';
-import type { Scene, SceneType, SceneContent, Whiteboard } from '@/lib/types/stage';
+import type {
+  GenerationContextSummary,
+  Scene,
+  SceneContent,
+  SceneType,
+  Whiteboard,
+} from '@/lib/types/stage';
 import type { Action } from '@/lib/types/action';
 import type {
   SessionType,
@@ -48,6 +54,7 @@ export interface StageRecord {
   style?: string;
   currentSceneId?: string;
   agentIds?: string[]; // Agent IDs selected at creation time
+  generationContext?: GenerationContextSummary;
 }
 
 /**

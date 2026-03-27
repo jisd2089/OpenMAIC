@@ -21,25 +21,41 @@ import { resolveApiKey, resolveWebSearchApiKey } from '@/lib/server/provider-con
 import { resolveModel } from '@/lib/server/resolve-model';
 import { searchWithTavily, formatSearchResultsAsContext } from '@/lib/web-search/tavily';
 import { persistClassroom } from '@/lib/server/classroom-storage';
+import { normalizeScopeId } from '@/lib/constants/scope';
+import { buildGenerationRetrievalContext } from '@/lib/server/generation-retrieval';
+import { getKnowledgeVideoReferencesForGeneration } from '@/lib/server/generation-retrieval';
 import {
   generateMediaForClassroom,
   replaceMediaPlaceholders,
   generateTTSForClassroom,
 } from '@/lib/server/classroom-media-generation';
 import type { UserRequirements } from '@/lib/types/generation';
-import type { Scene, Stage } from '@/lib/types/stage';
+import type {
+  Scene,
+  SelectedKnowledgeBaseSummary,
+  SelectedMemorySummary,
+  Stage,
+} from '@/lib/types/stage';
 
 const log = createLogger('Classroom');
 
 export interface GenerateClassroomInput {
   requirement: string;
+  scopeId?: string;
   pdfContent?: { text: string; images: string[] };
   language?: string;
   enableWebSearch?: boolean;
   enableImageGeneration?: boolean;
   enableVideoGeneration?: boolean;
   enableTTS?: boolean;
-  agentMode?: 'default' | 'generate';
+  knowledgeBaseIds?: string[];
+  memoryIds?: string[];
+  enableKnowledgeRetrieval?: boolean;
+  enableMemoryRetrieval?: boolean;
+  preferKnowledgeVideos?: boolean;
+  selectedKnowledgeBases?: SelectedKnowledgeBaseSummary[];
+  selectedMemories?: SelectedMemorySummary[];
+  agentMode?: 'preset' | 'auto' | 'default' | 'generate';
 }
 
 export type ClassroomGenerationStep =
@@ -98,6 +114,10 @@ function createInMemoryStore(stage: Stage): StageStore {
 
 function normalizeLanguage(language?: string): 'zh-CN' | 'en-US' {
   return language === 'en-US' ? 'en-US' : 'zh-CN';
+}
+
+function shouldGenerateAgents(agentMode?: GenerateClassroomInput['agentMode']): boolean {
+  return agentMode === 'auto' || agentMode === 'generate';
 }
 
 function stripCodeFences(text: string): string {
@@ -167,6 +187,7 @@ export async function generateClassroom(
   },
 ): Promise<GenerateClassroomResult> {
   const { requirement, pdfContent } = input;
+  const scopeId = normalizeScopeId(input.scopeId);
 
   await options.onProgress?.({
     step: 'initializing',
@@ -212,8 +233,7 @@ export async function generateClassroom(
 
   // Resolve agents based on agentMode
   let agents: AgentInfo[];
-  const agentMode = input.agentMode || 'default';
-  if (agentMode === 'generate') {
+  if (shouldGenerateAgents(input.agentMode)) {
     log.info('Generating custom agent profiles via LLM...');
     try {
       agents = await generateAgentProfiles(requirement, lang, aiCall);
@@ -252,6 +272,21 @@ export async function generateClassroom(
     } else {
       log.warn('enableWebSearch is true but no Tavily API key configured, skipping web search');
     }
+  }
+
+  const retrievalContext = await buildGenerationRetrievalContext({
+    query: requirement,
+    scopeId,
+    knowledgeBaseIds: input.knowledgeBaseIds,
+    memoryIds: input.memoryIds,
+    enableKnowledgeRetrieval: input.enableKnowledgeRetrieval,
+    enableMemoryRetrieval: input.enableMemoryRetrieval,
+    preferKnowledgeVideos: input.preferKnowledgeVideos,
+  });
+  if (retrievalContext) {
+    researchContext = researchContext
+      ? `${researchContext}\n\n${retrievalContext}`
+      : retrievalContext;
   }
 
   await options.onProgress?.({
@@ -298,6 +333,19 @@ export async function generateClassroom(
     description: undefined,
     language: lang,
     style: 'interactive',
+    generationContext:
+      input.knowledgeBaseIds?.length || input.memoryIds?.length
+        ? {
+            scopeId,
+            knowledgeBaseIds: input.knowledgeBaseIds,
+            memoryIds: input.memoryIds,
+            selectedKnowledgeBases: input.selectedKnowledgeBases,
+            selectedMemories: input.selectedMemories,
+            enableKnowledgeRetrieval: input.enableKnowledgeRetrieval,
+            enableMemoryRetrieval: input.enableMemoryRetrieval,
+            preferKnowledgeVideos: input.preferKnowledgeVideos,
+          }
+        : undefined,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -320,6 +368,36 @@ export async function generateClassroom(
       totalScenes: outlines.length,
     });
 
+    const sceneQuery = [
+      safeOutline.title,
+      safeOutline.description,
+      ...(safeOutline.keyPoints || []),
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const sceneRetrievalContext =
+      input.enableKnowledgeRetrieval || input.enableMemoryRetrieval || input.memoryIds?.length
+        ? await buildGenerationRetrievalContext({
+            query: sceneQuery,
+            scopeId,
+            knowledgeBaseIds: input.knowledgeBaseIds,
+            memoryIds: input.memoryIds,
+            enableKnowledgeRetrieval: input.enableKnowledgeRetrieval,
+            enableMemoryRetrieval: input.enableMemoryRetrieval,
+            preferKnowledgeVideos: input.preferKnowledgeVideos,
+          })
+        : undefined;
+
+    const sceneKnowledgeVideoReferences =
+      input.knowledgeBaseIds && input.knowledgeBaseIds.length > 0
+        ? await getKnowledgeVideoReferencesForGeneration({
+            query: sceneQuery,
+            knowledgeBaseIds: input.knowledgeBaseIds,
+            preferKnowledgeVideos: input.preferKnowledgeVideos,
+          })
+        : [];
+
     const content = await generateSceneContent(
       safeOutline,
       aiCall,
@@ -329,9 +407,11 @@ export async function generateClassroom(
       undefined,
       undefined,
       agents,
+      sceneKnowledgeVideoReferences,
+      sceneRetrievalContext,
     );
     if (!content) {
-      log.warn(`Skipping scene "${safeOutline.title}" — content generation failed`);
+      log.warn(`Skipping scene "${safeOutline.title}" - content generation failed`);
       continue;
     }
 
@@ -340,9 +420,25 @@ export async function generateClassroom(
 
     const sceneId = createSceneWithActions(safeOutline, content, actions, api);
     if (!sceneId) {
-      log.warn(`Skipping scene "${safeOutline.title}" — scene creation failed`);
+      log.warn(`Skipping scene "${safeOutline.title}" - scene creation failed`);
       continue;
     }
+
+    const nextScenes = store.getState().scenes.map((scene) =>
+      scene.id === sceneId
+        ? {
+            ...scene,
+            generationContext:
+              sceneRetrievalContext || sceneKnowledgeVideoReferences.length > 0
+                ? {
+                    retrievalContext: sceneRetrievalContext,
+                    knowledgeVideoReferences: sceneKnowledgeVideoReferences,
+                  }
+                : undefined,
+          }
+        : scene,
+    );
+    store.setState({ scenes: nextScenes });
 
     generatedScenes += 1;
     const progressEnd = 30 + Math.floor(((index + 1) / Math.max(outlines.length, 1)) * 60);

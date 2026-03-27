@@ -9,7 +9,9 @@ import { NextRequest } from 'next/server';
 import { nanoid } from 'nanoid';
 import { callLLM } from '@/lib/ai/llm';
 import { createLogger } from '@/lib/logger';
-import { apiError, apiSuccess } from '@/lib/server/api-response';
+import { apiError, apiSuccess, API_ERROR_CODES } from '@/lib/server/api-response';
+import { parseJsonRequestWithSchema } from '@/lib/server/http-validation';
+import { agentProfilesRequestSchema } from '@/lib/server/generation/contracts';
 import { resolveModelFromHeaders } from '@/lib/server/resolve-model';
 
 const log = createLogger('Agent Profiles API');
@@ -51,7 +53,12 @@ function stripCodeFences(text: string): string {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as RequestBody;
+    const parsed = await parseJsonRequestWithSchema(req, agentProfilesRequestSchema);
+    if (!parsed.success) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, parsed.error);
+    }
+
+    const body = parsed.data as RequestBody;
     const {
       stageInfo,
       sceneOutlines,
@@ -61,28 +68,13 @@ export async function POST(req: NextRequest) {
       availableVoices,
     } = body;
 
-    // ── Validate required fields ──
-    if (!stageInfo?.name) {
-      return apiError('MISSING_REQUIRED_FIELD', 400, 'stageInfo.name is required');
-    }
-    if (!language) {
-      return apiError('MISSING_REQUIRED_FIELD', 400, 'language is required');
-    }
-    if (!availableAvatars || availableAvatars.length === 0) {
-      return apiError(
-        'MISSING_REQUIRED_FIELD',
-        400,
-        'availableAvatars is required and must not be empty',
-      );
-    }
-
-    // ── Model resolution from request headers ──
+    // 鈹€鈹€ Model resolution from request headers 鈹€鈹€
     const { model: languageModel, modelString } = resolveModelFromHeaders(req);
 
-    // ── Build prompt ──
+    // 鈹€鈹€ Build prompt 鈹€鈹€
     const sceneSummary = sceneOutlines?.length
       ? sceneOutlines
-          .map((s, i) => `${i + 1}. ${s.title}${s.description ? ` — ${s.description}` : ''}`)
+          .map((s, i) => `${i + 1}. ${s.title}${s.description ? ` 锟?${s.description}` : ''}`)
           .join('\n')
       : null;
 
@@ -153,9 +145,9 @@ Return a JSON object with this exact structure:
       'agent-profiles',
     );
 
-    // ── Parse LLM response ──
+    // 鈹€鈹€ Parse LLM response 鈹€鈹€
     const rawText = stripCodeFences(result.text);
-    let parsed: {
+    let parsedResponse: {
       agents: Array<{
         name: string;
         role: string;
@@ -168,23 +160,23 @@ Return a JSON object with this exact structure:
     };
 
     try {
-      parsed = JSON.parse(rawText);
+      parsedResponse = JSON.parse(rawText);
     } catch {
       log.error('Failed to parse LLM response as JSON:', rawText.substring(0, 500));
       return apiError('PARSE_FAILED', 500, 'Failed to parse agent profiles from LLM response');
     }
 
-    // ── Validate parsed structure ──
-    if (!parsed.agents || !Array.isArray(parsed.agents) || parsed.agents.length < 2) {
-      log.error(`Expected at least 2 agents, got ${parsed.agents?.length ?? 0}`);
+    // 鈹€鈹€ Validate parsed structure 鈹€鈹€
+    if (!parsedResponse.agents || !Array.isArray(parsedResponse.agents) || parsedResponse.agents.length < 2) {
+      log.error(`Expected at least 2 agents, got ${parsedResponse.agents?.length ?? 0}`);
       return apiError(
         'GENERATION_FAILED',
         500,
-        `Expected at least 2 agents but LLM returned ${parsed.agents?.length ?? 0}`,
+        `Expected at least 2 agents but LLM returned ${parsedResponse.agents?.length ?? 0}`,
       );
     }
 
-    const teacherCount = parsed.agents.filter((a) => a.role === 'teacher').length;
+    const teacherCount = parsedResponse.agents.filter((a) => a.role === 'teacher').length;
     if (teacherCount !== 1) {
       log.error(`Expected exactly 1 teacher, got ${teacherCount}`);
       return apiError(
@@ -194,8 +186,8 @@ Return a JSON object with this exact structure:
       );
     }
 
-    // ── Build output with IDs ──
-    const agents = parsed.agents.map((agent, index) => {
+    // 鈹€鈹€ Build output with IDs 鈹€鈹€
+    const agents = parsedResponse.agents.map((agent, index) => {
       // Parse voice "providerId::voiceId" format
       let voiceConfig: { providerId: string; voiceId: string } | undefined;
       if (agent.voice && agent.voice.includes('::')) {

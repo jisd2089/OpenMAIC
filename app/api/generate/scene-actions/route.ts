@@ -24,8 +24,10 @@ import type {
 } from '@/lib/types/generation';
 import type { SpeechAction } from '@/lib/types/action';
 import { createLogger } from '@/lib/logger';
-import { apiError, apiSuccess } from '@/lib/server/api-response';
+import { apiError, apiSuccess, API_ERROR_CODES } from '@/lib/server/api-response';
+import { parseJsonRequestWithSchema } from '@/lib/server/http-validation';
 import { resolveModelFromHeaders } from '@/lib/server/resolve-model';
+import { sceneActionsRequestSchema } from '@/lib/server/generation/contracts';
 
 const log = createLogger('Scene Actions API');
 
@@ -33,7 +35,12 @@ export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const parsed = await parseJsonRequestWithSchema(req, sceneActionsRequestSchema);
+    if (!parsed.success) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, parsed.error);
+    }
+
+    const body = parsed.data;
     const {
       outline,
       allOutlines,

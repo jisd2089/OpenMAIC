@@ -1,6 +1,9 @@
 import { type NextRequest } from 'next/server';
 import { randomUUID } from 'crypto';
+import { z } from 'zod';
 import { apiSuccess, apiError, API_ERROR_CODES } from '@/lib/server/api-response';
+import { parseJsonRequestWithSchema } from '@/lib/server/http-validation';
+import type { Scene, Stage } from '@/lib/types/stage';
 import {
   buildRequestOrigin,
   isValidClassroomId,
@@ -8,23 +11,34 @@ import {
   readClassroom,
 } from '@/lib/server/classroom-storage';
 
+const classroomPersistSchema = z.object({
+  stage: z
+    .object({
+      id: z.string().optional(),
+    })
+    .passthrough(),
+  scenes: z.array(z.unknown()),
+});
+
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { stage, scenes } = body;
-
-    if (!stage || !scenes) {
-      return apiError(
-        API_ERROR_CODES.MISSING_REQUIRED_FIELD,
-        400,
-        'Missing required fields: stage, scenes',
-      );
+    const parsed = await parseJsonRequestWithSchema(request, classroomPersistSchema);
+    if (!parsed.success) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, parsed.error);
     }
+    const { stage, scenes } = parsed.data;
 
     const id = stage.id || randomUUID();
     const baseUrl = buildRequestOrigin(request);
 
-    const persisted = await persistClassroom({ id, stage: { ...stage, id }, scenes }, baseUrl);
+    const persisted = await persistClassroom(
+      {
+        id,
+        stage: { ...stage, id } as Stage,
+        scenes: scenes as Scene[],
+      },
+      baseUrl,
+    );
 
     return apiSuccess({ id: persisted.id, url: persisted.url }, 201);
   } catch (error) {

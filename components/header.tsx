@@ -9,6 +9,7 @@ import {
   Loader2,
   Download,
   FileDown,
+  FileText,
   Package,
 } from 'lucide-react';
 import { useI18n } from '@/lib/hooks/use-i18n';
@@ -34,7 +35,8 @@ export function Header({ currentSceneTitle }: HeaderProps) {
   const [themeOpen, setThemeOpen] = useState(false);
 
   // Export
-  const { exporting: isExporting, exportPPTX, exportResourcePack } = useExportPPTX();
+  const { exporting: isExporting, exportPPTX, exportResourcePack, exportContextJson } =
+    useExportPPTX();
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
   const scenes = useStageStore((s) => s.scenes);
@@ -269,6 +271,21 @@ export function Header({ currentSceneTitle }: HeaderProps) {
                   <div>{t('export.resourcePack')}</div>
                   <div className="text-[11px] text-gray-400 dark:text-gray-500">
                     {t('export.resourcePackDesc')}
+                  </div>
+                </div>
+              </button>
+              <button
+                onClick={() => {
+                  setExportMenuOpen(false);
+                  exportContextJson();
+                }}
+                className="w-full px-4 py-2.5 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2.5"
+              >
+                <FileText className="w-4 h-4 text-gray-400 shrink-0" />
+                <div>
+                  <div>{t('export.contextJson')}</div>
+                  <div className="text-[11px] text-gray-400 dark:text-gray-500">
+                    {t('export.contextJsonDesc')}
                   </div>
                 </div>
               </button>

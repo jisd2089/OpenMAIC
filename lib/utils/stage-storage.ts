@@ -11,6 +11,10 @@ import { db } from './database';
 import { saveChatSessions, loadChatSessions, deleteChatSessions } from './chat-storage';
 import { clearPlaybackState } from './playback-storage';
 import { createLogger } from '@/lib/logger';
+import {
+  getGenerationContextKnowledgeBaseCount,
+  getGenerationContextMemoryCount,
+} from '@/lib/context/generation-context';
 
 const log = createLogger('StageStorage');
 
@@ -28,6 +32,9 @@ export interface StageListItem {
   sceneCount: number;
   createdAt: number;
   updatedAt: number;
+  knowledgeBaseCount?: number;
+  memoryCount?: number;
+  preferKnowledgeVideos?: boolean;
 }
 
 /**
@@ -48,6 +55,7 @@ export async function saveStageData(stageId: string, data: StageStoreData): Prom
       style: data.stage.style,
       currentSceneId: data.currentSceneId || undefined,
       agentIds: data.stage.agentIds,
+      generationContext: data.stage.generationContext,
     });
 
     // Delete old scenes first to avoid orphaned data
@@ -150,6 +158,9 @@ export async function listStages(): Promise<StageListItem[]> {
           sceneCount,
           createdAt: stage.createdAt,
           updatedAt: stage.updatedAt,
+          knowledgeBaseCount: getGenerationContextKnowledgeBaseCount(stage.generationContext),
+          memoryCount: getGenerationContextMemoryCount(stage.generationContext),
+          preferKnowledgeVideos: stage.generationContext?.preferKnowledgeVideos ?? false,
         };
       }),
     );

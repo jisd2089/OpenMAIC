@@ -16,9 +16,11 @@ import { NextRequest } from 'next/server';
 import { statelessGenerate } from '@/lib/orchestration/stateless-generate';
 import type { StatelessChatRequest, StatelessEvent } from '@/lib/types/chat';
 import type { ThinkingConfig } from '@/lib/types/provider';
-import { apiError } from '@/lib/server/api-response';
+import { apiError, API_ERROR_CODES } from '@/lib/server/api-response';
 import { createLogger } from '@/lib/logger';
 import { resolveModel } from '@/lib/server/resolve-model';
+import { parseJsonRequestWithSchema } from '@/lib/server/http-validation';
+import { statelessChatRequestSchema } from '@/lib/server/generation/contracts';
 const log = createLogger('Chat API');
 
 // Allow streaming responses up to 60 seconds
@@ -44,20 +46,11 @@ export async function POST(req: NextRequest) {
   const encoder = new TextEncoder();
 
   try {
-    const body: StatelessChatRequest = await req.json();
-
-    // Validate required fields
-    if (!body.messages || !Array.isArray(body.messages)) {
-      return apiError('MISSING_REQUIRED_FIELD', 400, 'Missing required field: messages');
+    const parsed = await parseJsonRequestWithSchema(req, statelessChatRequestSchema);
+    if (!parsed.success) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, parsed.error);
     }
-
-    if (!body.storeState) {
-      return apiError('MISSING_REQUIRED_FIELD', 400, 'Missing required field: storeState');
-    }
-
-    if (!body.config || !body.config.agentIds || body.config.agentIds.length === 0) {
-      return apiError('MISSING_REQUIRED_FIELD', 400, 'Missing required field: config.agentIds');
-    }
+    const body = parsed.data as unknown as StatelessChatRequest;
 
     const { model: languageModel, apiKey: resolvedApiKey } = resolveModel({
       modelString: body.model,

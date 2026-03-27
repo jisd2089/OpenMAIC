@@ -7,10 +7,29 @@ import type {
   ImageMapping,
 } from '@/lib/types/generation';
 
+export interface SelectedKnowledgeBaseSummary {
+  id: string;
+  name: string;
+}
+
+export interface SelectedMemorySummary {
+  id: string;
+  category: string;
+  contentPreview: string;
+}
+
 // Session state stored in sessionStorage
 export interface GenerationSessionState {
   sessionId: string;
   requirements: UserRequirements;
+  scopeId?: string;
+  knowledgeBaseIds?: string[];
+  memoryIds?: string[];
+  selectedKnowledgeBases?: SelectedKnowledgeBaseSummary[];
+  selectedMemories?: SelectedMemorySummary[];
+  enableKnowledgeRetrieval?: boolean;
+  enableMemoryRetrieval?: boolean;
+  preferKnowledgeVideos?: boolean;
   pdfText: string;
   pdfImages?: PdfImage[];
   imageStorageIds?: string[];

@@ -8,6 +8,7 @@ import { useMediaGenerationStore, isMediaPlaceholder } from '@/lib/store/media-g
 import { useSettingsStore } from '@/lib/store/settings';
 import { useMediaStageId } from '@/lib/contexts/media-stage-context';
 import { retryMediaTask } from '@/lib/media/media-orchestrator';
+import { resolveKnowledgeMediaPoster, resolveKnowledgeMediaSrc } from '@/lib/kb/reference';
 import { RotateCcw, Film, ShieldAlert, VideoOff } from 'lucide-react';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { createLogger } from '@/lib/logger';
@@ -40,7 +41,10 @@ export function BaseVideoElement({ elementInfo }: BaseVideoElementProps) {
     return t;
   });
   const videoGenerationEnabled = useSettingsStore((s) => s.videoGenerationEnabled);
-  const resolvedSrc = task?.status === 'done' && task.objectUrl ? task.objectUrl : elementInfo.src;
+  const resolvedSrc = resolveKnowledgeMediaSrc(
+    task?.status === 'done' && task.objectUrl ? task.objectUrl : elementInfo.src,
+  );
+  const resolvedPoster = resolveKnowledgeMediaPoster(elementInfo.src, task?.poster || elementInfo.poster);
   const showDisabled = isPlaceholder && !task && !videoGenerationEnabled;
   const showSkeleton =
     isPlaceholder &&
@@ -166,7 +170,7 @@ export function BaseVideoElement({ elementInfo }: BaseVideoElementProps) {
             className="w-full h-full"
             style={{ objectFit: 'contain' }}
             src={resolvedSrc}
-            poster={task?.poster || elementInfo.poster}
+            poster={resolvedPoster}
             preload="metadata"
             controls
             onEnded={handleEnded}

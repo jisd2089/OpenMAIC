@@ -1,17 +1,19 @@
 import { NextRequest } from 'next/server';
 import { generateText } from 'ai';
 import { createLogger } from '@/lib/logger';
-import { apiError, apiSuccess } from '@/lib/server/api-response';
+import { apiError, apiSuccess, API_ERROR_CODES } from '@/lib/server/api-response';
+import { parseJsonRequestWithSchema } from '@/lib/server/http-validation';
+import { verifyModelRequestSchema } from '@/lib/server/generation/contracts';
 import { resolveModel } from '@/lib/server/resolve-model';
 const log = createLogger('Verify Model');
 
 export async function POST(req: NextRequest) {
   try {
-    const { apiKey, baseUrl, model, providerType, requiresApiKey } = await req.json();
-
-    if (!model) {
-      return apiError('MISSING_REQUIRED_FIELD', 400, 'Model name is required');
+    const parsed = await parseJsonRequestWithSchema(req, verifyModelRequestSchema);
+    if (!parsed.success) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, parsed.error);
     }
+    const { apiKey, baseUrl, model, providerType, requiresApiKey } = parsed.data;
 
     // Parse model string and resolve server-side fallback
     let languageModel;

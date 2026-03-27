@@ -20,7 +20,9 @@ import { generateImage, aspectRatioToDimensions } from '@/lib/media/image-provid
 import { resolveImageApiKey, resolveImageBaseUrl } from '@/lib/server/provider-config';
 import type { ImageProviderId, ImageGenerationOptions } from '@/lib/media/types';
 import { createLogger } from '@/lib/logger';
-import { apiError, apiSuccess } from '@/lib/server/api-response';
+import { apiError, apiSuccess, API_ERROR_CODES } from '@/lib/server/api-response';
+import { parseJsonRequestWithSchema } from '@/lib/server/http-validation';
+import { imageGenerationRequestSchema } from '@/lib/server/generation/contracts';
 import { validateUrlForSSRF } from '@/lib/server/ssrf-guard';
 
 const log = createLogger('ImageGeneration API');
@@ -29,11 +31,11 @@ export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json()) as ImageGenerationOptions;
-
-    if (!body.prompt) {
-      return apiError('MISSING_REQUIRED_FIELD', 400, 'Missing prompt');
+    const parsed = await parseJsonRequestWithSchema(request, imageGenerationRequestSchema);
+    if (!parsed.success) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, parsed.error);
     }
+    const body = parsed.data as ImageGenerationOptions;
 
     const providerId = (request.headers.get('x-image-provider') || 'seedream') as ImageProviderId;
     const clientApiKey = request.headers.get('x-api-key') || undefined;

@@ -2,6 +2,7 @@
 
 import type { PPTVideoElement } from '@/lib/types/slides';
 import { isMediaPlaceholder } from '@/lib/store/media-generation';
+import { resolveKnowledgeMediaPoster, resolveKnowledgeMediaSrc } from '@/lib/kb/reference';
 
 export interface VideoElementProps {
   elementInfo: PPTVideoElement;
@@ -14,6 +15,9 @@ export interface VideoElementProps {
  * Does NOT autoplay to avoid disrupting the editing experience.
  */
 export function VideoElement({ elementInfo, selectElement }: VideoElementProps) {
+  const resolvedSrc = resolveKnowledgeMediaSrc(elementInfo.src);
+  const resolvedPoster = resolveKnowledgeMediaPoster(elementInfo.src, elementInfo.poster);
+
   const handleSelectElement = (e: React.MouseEvent | React.TouchEvent) => {
     if (elementInfo.lock) return;
     e.stopPropagation();
@@ -39,20 +43,20 @@ export function VideoElement({ elementInfo, selectElement }: VideoElementProps) 
           onMouseDown={handleSelectElement}
           onTouchStart={handleSelectElement}
         >
-          {elementInfo.poster ? (
+          {resolvedPoster ? (
             <img
               className="w-full h-full"
               style={{ objectFit: 'contain' }}
-              src={elementInfo.poster}
+              src={resolvedPoster}
               alt=""
               draggable={false}
               onDragStart={(e) => e.preventDefault()}
             />
-          ) : elementInfo.src && !isMediaPlaceholder(elementInfo.src) ? (
+          ) : resolvedSrc && !isMediaPlaceholder(elementInfo.src) ? (
             <video
               className="w-full h-full"
               style={{ objectFit: 'contain', pointerEvents: 'none' }}
-              src={elementInfo.src}
+              src={resolvedSrc}
               preload="metadata"
             />
           ) : (

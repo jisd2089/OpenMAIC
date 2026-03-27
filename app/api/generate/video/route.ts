@@ -21,7 +21,9 @@ import { generateVideo, normalizeVideoOptions } from '@/lib/media/video-provider
 import { resolveVideoApiKey, resolveVideoBaseUrl } from '@/lib/server/provider-config';
 import type { VideoProviderId, VideoGenerationOptions } from '@/lib/media/types';
 import { createLogger } from '@/lib/logger';
-import { apiError, apiSuccess } from '@/lib/server/api-response';
+import { apiError, apiSuccess, API_ERROR_CODES } from '@/lib/server/api-response';
+import { parseJsonRequestWithSchema } from '@/lib/server/http-validation';
+import { videoGenerationRequestSchema } from '@/lib/server/generation/contracts';
 import { validateUrlForSSRF } from '@/lib/server/ssrf-guard';
 
 const log = createLogger('VideoGeneration API');
@@ -30,11 +32,11 @@ export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json()) as VideoGenerationOptions;
-
-    if (!body.prompt) {
-      return apiError('MISSING_REQUIRED_FIELD', 400, 'Missing prompt');
+    const parsed = await parseJsonRequestWithSchema(request, videoGenerationRequestSchema);
+    if (!parsed.success) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, parsed.error);
     }
+    const body = parsed.data as VideoGenerationOptions;
 
     const providerId = (request.headers.get('x-video-provider') || 'seedance') as VideoProviderId;
     const clientApiKey = request.headers.get('x-api-key') || undefined;

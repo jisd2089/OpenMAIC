@@ -7,9 +7,9 @@ import { useSettingsStore } from '@/lib/store/settings';
 import { db } from '@/lib/utils/database';
 import type { SceneOutline, PdfImage, ImageMapping } from '@/lib/types/generation';
 import type { AgentInfo } from '@/lib/generation/generation-pipeline';
+import type { KnowledgeVideoReference } from '@/lib/kb/reference';
 import type { Scene } from '@/lib/types/stage';
-import type { Action, SpeechAction } from '@/lib/types/action';
-import type { TTSProviderId } from '@/lib/audio/types';
+import type { SpeechAction } from '@/lib/types/action';
 import { splitLongSpeechActions } from '@/lib/audio/tts-utils';
 import { generateMediaForOutlines } from '@/lib/media/media-orchestrator';
 import { createLogger } from '@/lib/logger';
@@ -20,6 +20,8 @@ interface SceneContentResult {
   success: boolean;
   content?: unknown;
   effectiveOutline?: SceneOutline;
+  retrievalContext?: string;
+  knowledgeVideoReferences?: KnowledgeVideoReference[];
   error?: string;
 }
 
@@ -67,6 +69,12 @@ async function fetchSceneContent(
     stageId: string;
     pdfImages?: PdfImage[];
     imageMapping?: ImageMapping;
+    scopeId?: string;
+    knowledgeBaseIds?: string[];
+    memoryIds?: string[];
+    enableKnowledgeRetrieval?: boolean;
+    enableMemoryRetrieval?: boolean;
+    preferKnowledgeVideos?: boolean;
     stageInfo: {
       name: string;
       description?: string;
@@ -219,6 +227,12 @@ export interface UseSceneGeneratorOptions {
 export interface GenerationParams {
   pdfImages?: PdfImage[];
   imageMapping?: ImageMapping;
+  scopeId?: string;
+  knowledgeBaseIds?: string[];
+  memoryIds?: string[];
+  enableKnowledgeRetrieval?: boolean;
+  enableMemoryRetrieval?: boolean;
+  preferKnowledgeVideos?: boolean;
   stageInfo: {
     name: string;
     description?: string;
@@ -318,6 +332,12 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
               stageId: stage.id,
               pdfImages: params.pdfImages,
               imageMapping: params.imageMapping,
+              scopeId: params.scopeId,
+              knowledgeBaseIds: params.knowledgeBaseIds,
+              memoryIds: params.memoryIds,
+              enableKnowledgeRetrieval: params.enableKnowledgeRetrieval,
+              enableMemoryRetrieval: params.enableMemoryRetrieval,
+              preferKnowledgeVideos: params.preferKnowledgeVideos,
               stageInfo: params.stageInfo,
               agents: params.agents,
             },
@@ -358,7 +378,16 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
           );
 
           if (actionsResult.success && actionsResult.scene) {
-            const scene = actionsResult.scene;
+            const scene = {
+              ...actionsResult.scene,
+              generationContext:
+                contentResult.retrievalContext || contentResult.knowledgeVideoReferences?.length
+                  ? {
+                      retrievalContext: contentResult.retrievalContext,
+                      knowledgeVideoReferences: contentResult.knowledgeVideoReferences,
+                    }
+                  : undefined,
+            };
             const settings = useSettingsStore.getState();
 
             // TTS generation — failure means the whole scene fails
@@ -467,6 +496,11 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
             stageId: state.stage.id,
             pdfImages: params.pdfImages,
             imageMapping: params.imageMapping,
+            knowledgeBaseIds: params.knowledgeBaseIds,
+            memoryIds: params.memoryIds,
+            enableKnowledgeRetrieval: params.enableKnowledgeRetrieval,
+            enableMemoryRetrieval: params.enableMemoryRetrieval,
+            preferKnowledgeVideos: params.preferKnowledgeVideos,
             stageInfo: params.stageInfo,
             agents: params.agents,
           },
@@ -505,10 +539,21 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
           return;
         }
 
+        const scene: Scene = {
+          ...actionsResult.scene,
+          generationContext:
+            contentResult.retrievalContext || contentResult.knowledgeVideoReferences?.length
+              ? {
+                  retrievalContext: contentResult.retrievalContext,
+                  knowledgeVideoReferences: contentResult.knowledgeVideoReferences,
+                }
+              : undefined,
+        };
+
         // Step 3: TTS
         const settings = useSettingsStore.getState();
         if (settings.ttsEnabled && settings.ttsProviderId !== 'browser-native-tts') {
-          const ttsResult = await generateTTSForScene(actionsResult.scene, signal);
+          const ttsResult = await generateTTSForScene(scene, signal);
           if (!ttsResult.success) {
             store.getState().addFailedOutline(outline);
             return;
@@ -516,7 +561,7 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
         }
 
         removeGeneratingOutline();
-        store.getState().addScene(actionsResult.scene);
+        store.getState().addScene(scene);
 
         // Resume remaining generation if there are pending outlines
         if (store.getState().generatingOutlines.length > 0 && lastParamsRef.current) {

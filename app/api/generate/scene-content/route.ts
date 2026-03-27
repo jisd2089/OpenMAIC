@@ -3,7 +3,7 @@
  *
  * Generates scene content (slides/quiz/interactive/pbl) from an outline.
  * This is the first half of the two-step scene generation pipeline.
- * Does NOT generate actions — use /api/generate/scene-actions for that.
+ * Does NOT generate actions - use /api/generate/scene-actions for that.
  */
 
 import { NextRequest } from 'next/server';
@@ -16,8 +16,15 @@ import {
 import type { AgentInfo } from '@/lib/generation/generation-pipeline';
 import type { SceneOutline, PdfImage, ImageMapping } from '@/lib/types/generation';
 import { createLogger } from '@/lib/logger';
-import { apiError, apiSuccess } from '@/lib/server/api-response';
+import { apiError, apiSuccess, API_ERROR_CODES } from '@/lib/server/api-response';
+import { parseJsonRequestWithSchema } from '@/lib/server/http-validation';
 import { resolveModelFromHeaders } from '@/lib/server/resolve-model';
+import type { KnowledgeVideoReference } from '@/lib/kb/reference';
+import { sceneContentRequestSchema } from '@/lib/server/generation/contracts';
+import {
+  buildGenerationRetrievalContext,
+  getKnowledgeVideoReferencesForGeneration,
+} from '@/lib/server/generation-retrieval';
 
 const log = createLogger('Scene Content API');
 
@@ -25,14 +32,19 @@ export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const parsed = await parseJsonRequestWithSchema(req, sceneContentRequestSchema);
+    if (!parsed.success) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, parsed.error);
+    }
+
+    const body = parsed.data;
     const {
       outline: rawOutline,
-      allOutlines,
+      allOutlines: _allOutlines,
       pdfImages,
       imageMapping,
       stageInfo,
-      stageId,
+      stageId: _stageId,
       agents,
     } = body as {
       outline: SceneOutline;
@@ -47,22 +59,14 @@ export async function POST(req: NextRequest) {
       };
       stageId: string;
       agents?: AgentInfo[];
+      scopeId?: string;
+      knowledgeVideoReferences?: KnowledgeVideoReference[];
+      knowledgeBaseIds?: string[];
+      memoryIds?: string[];
+      enableKnowledgeRetrieval?: boolean;
+      enableMemoryRetrieval?: boolean;
+      preferKnowledgeVideos?: boolean;
     };
-
-    // Validate required fields
-    if (!rawOutline) {
-      return apiError('MISSING_REQUIRED_FIELD', 400, 'outline is required');
-    }
-    if (!allOutlines || allOutlines.length === 0) {
-      return apiError(
-        'MISSING_REQUIRED_FIELD',
-        400,
-        'allOutlines is required and must not be empty',
-      );
-    }
-    if (!stageId) {
-      return apiError('MISSING_REQUIRED_FIELD', 400, 'stageId is required');
-    }
 
     // Ensure outline has language from stageInfo (fallback for older outlines)
     const outline: SceneOutline = {
@@ -130,6 +134,41 @@ export async function POST(req: NextRequest) {
     // The content generator receives placeholder IDs (gen_img_1, gen_vid_1) as-is.
     // resolveImageIds() in generation-pipeline.ts will keep these placeholders in elements.
     const generatedMediaMapping: ImageMapping = {};
+    const retrievalContext =
+      body.enableKnowledgeRetrieval ||
+      body.enableMemoryRetrieval ||
+      (body.memoryIds && body.memoryIds.length > 0)
+        ? await buildGenerationRetrievalContext({
+            query: [
+              effectiveOutline.title,
+              effectiveOutline.description,
+              ...(effectiveOutline.keyPoints || []),
+            ]
+              .filter(Boolean)
+              .join('\n'),
+            scopeId: body.scopeId,
+            knowledgeBaseIds: body.knowledgeBaseIds,
+            memoryIds: body.memoryIds,
+            enableKnowledgeRetrieval: body.enableKnowledgeRetrieval,
+            enableMemoryRetrieval: body.enableMemoryRetrieval,
+            preferKnowledgeVideos: body.preferKnowledgeVideos,
+          })
+        : undefined;
+    const knowledgeVideoReferences =
+      body.knowledgeVideoReferences ||
+      (body.knowledgeBaseIds && body.knowledgeBaseIds.length > 0
+        ? await getKnowledgeVideoReferencesForGeneration({
+            query: [
+              effectiveOutline.title,
+              effectiveOutline.description,
+              ...(effectiveOutline.keyPoints || []),
+            ]
+              .filter(Boolean)
+              .join('\n'),
+            knowledgeBaseIds: body.knowledgeBaseIds,
+            preferKnowledgeVideos: body.preferKnowledgeVideos,
+          })
+        : []);
 
     // ── Generate content ──
     log.info(
@@ -145,6 +184,8 @@ export async function POST(req: NextRequest) {
       hasVision,
       generatedMediaMapping,
       agents,
+      knowledgeVideoReferences,
+      retrievalContext,
     );
 
     if (!content) {
@@ -159,7 +200,7 @@ export async function POST(req: NextRequest) {
 
     log.info(`Content generated successfully: "${effectiveOutline.title}"`);
 
-    return apiSuccess({ content, effectiveOutline });
+    return apiSuccess({ content, effectiveOutline, retrievalContext, knowledgeVideoReferences });
   } catch (error) {
     log.error('Scene content generation error:', error);
     return apiError('INTERNAL_ERROR', 500, error instanceof Error ? error.message : String(error));

@@ -2,12 +2,40 @@
 import type { Slide } from '@/lib/types/slides';
 import type { Action } from '@/lib/types/action';
 import type { PBLProjectConfig } from '@/lib/pbl/types';
+import type { KnowledgeVideoReference } from '@/lib/kb/reference';
 
 export type SceneType = 'slide' | 'quiz' | 'interactive' | 'pbl';
 
 export type StageMode = 'autonomous' | 'playback';
 
 export type Whiteboard = Omit<Slide, 'theme' | 'turningMode' | 'sectionTag' | 'type'>;
+
+export interface SelectedKnowledgeBaseSummary {
+  id: string;
+  name: string;
+}
+
+export interface SelectedMemorySummary {
+  id: string;
+  category: string;
+  contentPreview: string;
+}
+
+export interface GenerationContextSummary {
+  scopeId?: string;
+  knowledgeBaseIds?: string[];
+  memoryIds?: string[];
+  selectedKnowledgeBases?: SelectedKnowledgeBaseSummary[];
+  selectedMemories?: SelectedMemorySummary[];
+  enableKnowledgeRetrieval?: boolean;
+  enableMemoryRetrieval?: boolean;
+  preferKnowledgeVideos?: boolean;
+}
+
+export interface SceneGenerationContext {
+  retrievalContext?: string;
+  knowledgeVideoReferences?: KnowledgeVideoReference[];
+}
 
 /**
  * Stage - Represents the entire classroom/course
@@ -21,6 +49,7 @@ export interface Stage {
   // Stage metadata
   language?: string;
   style?: string;
+  generationContext?: GenerationContextSummary;
   // Whiteboard data
   whiteboard?: Whiteboard[];
   // Agent IDs selected when this classroom was created
@@ -54,6 +83,7 @@ export interface Scene {
   };
 
   // Metadata
+  generationContext?: SceneGenerationContext;
   createdAt?: number;
   updatedAt?: number;
 }

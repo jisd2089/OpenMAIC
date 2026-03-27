@@ -1,20 +1,22 @@
 import { NextRequest } from 'next/server';
 import { createLogger } from '@/lib/logger';
-import { apiError, apiSuccess } from '@/lib/server/api-response';
+import { apiError, apiSuccess, API_ERROR_CODES } from '@/lib/server/api-response';
 import { resolvePDFApiKey, resolvePDFBaseUrl } from '@/lib/server/provider-config';
 import { validateUrlForSSRF } from '@/lib/server/ssrf-guard';
+import { parseJsonRequestWithSchema } from '@/lib/server/http-validation';
+import { verifyPdfProviderRequestSchema } from '@/lib/server/generation/contracts';
 
 const log = createLogger('Verify PDF Provider');
 
 export async function POST(req: NextRequest) {
   try {
-    const { providerId, apiKey, baseUrl } = await req.json();
-
-    if (!providerId) {
-      return apiError('MISSING_REQUIRED_FIELD', 400, 'Provider ID is required');
+    const parsed = await parseJsonRequestWithSchema(req, verifyPdfProviderRequestSchema);
+    if (!parsed.success) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, parsed.error);
     }
+    const { providerId, apiKey, baseUrl } = parsed.data;
 
-    const clientBaseUrl = (baseUrl as string | undefined) || undefined;
+    const clientBaseUrl = baseUrl || undefined;
     if (clientBaseUrl && process.env.NODE_ENV === 'production') {
       const ssrfError = validateUrlForSSRF(clientBaseUrl);
       if (ssrfError) {
@@ -28,7 +30,7 @@ export async function POST(req: NextRequest) {
     }
 
     const resolvedApiKey = clientBaseUrl
-      ? (apiKey as string | undefined) || ''
+      ? apiKey || ''
       : resolvePDFApiKey(providerId, apiKey);
 
     const headers: Record<string, string> = {};

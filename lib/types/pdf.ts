@@ -10,6 +10,12 @@ export interface ParsedPdfContent {
   /** Extracted text content from the PDF */
   text: string;
 
+  /** Optional per-page extracted text blocks */
+  pageTexts?: Array<{
+    pageNumber: number;
+    text: string;
+  }>;
+
   /** Array of images as base64 data URLs */
   images: string[];
 
@@ -53,6 +59,11 @@ export interface ParsedPdfContent {
       description?: string;
       width?: number;
       height?: number;
+    }>;
+    /** Per-page text blocks when the provider can retain page boundaries */
+    pageTexts?: Array<{
+      pageNumber: number;
+      text: string;
     }>;
     [key: string]: unknown;
   };
