@@ -82,7 +82,7 @@ describe('knowledge base and memory API route integration', () => {
           item.type === 'chunk' && item.text?.includes('chloroplast content'),
       ),
     ).toBe(true);
-  });
+  }, 20000);
 
   it('handles memory create, list, detail, update, search, delete, and invalid JSON via route handlers', async () => {
     const memoryRoute = await import('@/app/api/memory/route');

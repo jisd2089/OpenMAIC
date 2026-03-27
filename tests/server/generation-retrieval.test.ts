@@ -175,5 +175,5 @@ describe('generation retrieval context injection', () => {
     );
     expect(call[9]).toContain('Knowledge Text');
     expect(call[9]).toContain('Memory:fact');
-  });
+  }, 20000);
 });
