@@ -11,6 +11,7 @@ import {
   FileDown,
   FileText,
   Package,
+  Sparkles,
 } from 'lucide-react';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { useTheme } from '@/lib/hooks/use-theme';
@@ -24,9 +25,10 @@ import { useExportPPTX } from '@/lib/export/use-export-pptx';
 
 interface HeaderProps {
   readonly currentSceneTitle: string;
+  readonly showPreviewBadge?: boolean;
 }
 
-export function Header({ currentSceneTitle }: HeaderProps) {
+export function Header({ currentSceneTitle, showPreviewBadge = false }: HeaderProps) {
   const { t, locale, setLocale } = useI18n();
   const { theme, setTheme } = useTheme();
   const router = useRouter();
@@ -91,12 +93,20 @@ export function Header({ currentSceneTitle }: HeaderProps) {
             <span className="text-[10px] uppercase tracking-widest font-bold text-gray-400 dark:text-gray-500 mb-0.5">
               {t('stage.currentScene')}
             </span>
-            <h1
-              className="text-xl font-bold text-gray-800 dark:text-gray-200 tracking-tight truncate"
-              suppressHydrationWarning
-            >
-              {currentSceneTitle || t('common.loading')}
-            </h1>
+            <div className="flex items-center gap-2 min-w-0">
+              <h1
+                className="text-xl font-bold text-gray-800 dark:text-gray-200 tracking-tight truncate"
+                suppressHydrationWarning
+              >
+                {currentSceneTitle || t('common.loading')}
+              </h1>
+              {showPreviewBadge ? (
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-violet-700 dark:border-violet-800 dark:bg-violet-900/30 dark:text-violet-200">
+                  <Sparkles className="size-3" />
+                  {t('classroomOps.previewCanvasActive')}
+                </span>
+              ) : null}
+            </div>
           </div>
         </div>
 

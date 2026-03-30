@@ -2,6 +2,7 @@
 
 import { Brain, ChevronDown, Copy, Database, Download, Film } from 'lucide-react';
 import { Stage } from '@/components/stage';
+import { ClassroomOpsPanel } from '@/components/classroom/classroom-ops-panel';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { ThemeProvider } from '@/lib/hooks/use-theme';
 import { useStageStore } from '@/lib/store';
@@ -152,11 +153,11 @@ export default function ClassroomDetailPage() {
       const generatedAgentIds = await loadGeneratedAgentsForStage(classroomId);
       const { useSettingsStore } = await import('@/lib/store/settings');
       if (generatedAgentIds.length > 0) {
-        // Auto mode â€” use generated agents from IndexedDB
+        // Auto mode â€?use generated agents from IndexedDB
         useSettingsStore.getState().setAgentMode('auto');
         useSettingsStore.getState().setSelectedAgentIds(generatedAgentIds);
       } else {
-        // Preset mode â€” restore agent IDs saved in the stage at creation time.
+        // Preset mode â€?restore agent IDs saved in the stage at creation time.
         // Filter out any stale generated IDs that may have been persisted before
         // the bleed-fix, so they don't resolve against a leftover registry entry.
         const stage = useStageStore.getState().stage;
@@ -180,6 +181,28 @@ export default function ClassroomDetailPage() {
       setLoading(false);
     }
   }, [classroomId, loadFromStorage]);
+
+  const reloadClassroomFromServer = useCallback(async () => {
+    const res = await fetch(`/api/classroom/${encodeURIComponent(classroomId)}`, {
+      cache: 'no-store',
+    });
+    const json = await res.json();
+    if (!res.ok || !json.classroom) {
+      throw new Error(json.error || 'Failed to reload classroom');
+    }
+
+    const { stage, scenes } = json.classroom;
+    const currentSceneId = useStageStore.getState().currentSceneId;
+    useStageStore.getState().setStage(stage);
+    useStageStore.setState({
+      scenes,
+      currentSceneId: scenes.some((scene: { id: string }) => scene.id === currentSceneId)
+        ? currentSceneId
+        : (scenes[0]?.id ?? null),
+    });
+    setContextSummary(stage.generationContext ?? null);
+    await useStageStore.getState().saveToStorage();
+  }, [classroomId]);
 
   useEffect(() => {
     // Reset loading state on course switch to unmount Stage during transition,
@@ -285,6 +308,7 @@ export default function ClassroomDetailPage() {
     <ThemeProvider>
       <MediaStageProvider value={classroomId}>
         <div className="relative h-screen flex flex-col overflow-hidden">
+          <ClassroomOpsPanel classroomId={classroomId} onReload={reloadClassroomFromServer} />
           {contextSummary &&
           hasGenerationContextSummary(contextSummary) ? (
             <div className="absolute top-4 right-4 z-40 max-w-sm">
@@ -538,3 +562,4 @@ export default function ClassroomDetailPage() {
     </ThemeProvider>
   );
 }
+

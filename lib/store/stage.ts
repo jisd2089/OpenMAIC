@@ -59,6 +59,11 @@ interface StageState {
   // Persisted outlines for resume-on-refresh
   outlines: SceneOutline[];
 
+  // Transient regeneration preview state (not persisted)
+  regenerationPreviewSceneIds: string[];
+  regenerationPreviewScenes: Scene[];
+  showRegenerationPreview: boolean;
+
   // Transient generation tracking (not persisted)
   generationEpoch: number;
   generationStatus: 'idle' | 'generating' | 'paused' | 'completed' | 'error';
@@ -77,6 +82,9 @@ interface StageState {
   setToolbarState: (state: ToolbarState) => void;
   setGeneratingOutlines: (outlines: SceneOutline[]) => void;
   setOutlines: (outlines: SceneOutline[]) => void;
+  setRegenerationPreviewSceneIds: (sceneIds: string[]) => void;
+  setRegenerationPreviewScenes: (scenes: Scene[]) => void;
+  setShowRegenerationPreview: (show: boolean) => void;
   setGenerationStatus: (status: 'idle' | 'generating' | 'paused' | 'completed' | 'error') => void;
   setCurrentGeneratingOrder: (order: number) => void;
   bumpGenerationEpoch: () => void;
@@ -105,6 +113,9 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
   toolbarState: 'ai',
   generatingOutlines: [],
   outlines: [],
+  regenerationPreviewSceneIds: [],
+  regenerationPreviewScenes: [],
+  showRegenerationPreview: false,
   generationEpoch: 0,
   generationStatus: 'idle' as const,
   currentGeneratingOrder: -1,
@@ -117,6 +128,9 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
       scenes: [],
       currentSceneId: null,
       chats: [],
+      regenerationPreviewSceneIds: [],
+      regenerationPreviewScenes: [],
+      showRegenerationPreview: false,
       generationEpoch: s.generationEpoch + 1,
     }));
     debouncedSave();
@@ -211,6 +225,12 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
     }
   },
 
+  setRegenerationPreviewSceneIds: (regenerationPreviewSceneIds) => set({ regenerationPreviewSceneIds }),
+
+  setRegenerationPreviewScenes: (regenerationPreviewScenes) => set({ regenerationPreviewScenes }),
+
+  setShowRegenerationPreview: (showRegenerationPreview) => set({ showRegenerationPreview }),
+
   setGenerationStatus: (generationStatus) => set({ generationStatus }),
 
   setCurrentGeneratingOrder: (currentGeneratingOrder) => set({ currentGeneratingOrder }),
@@ -292,6 +312,9 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
           currentSceneId: data.currentSceneId,
           chats: data.chats,
           outlines,
+          regenerationPreviewSceneIds: [],
+          regenerationPreviewScenes: [],
+          showRegenerationPreview: false,
           // Compute generatingOutlines from persisted outlines minus completed scenes
           generatingOutlines: outlines.filter((o) => !data.scenes.some((s) => s.order === o.order)),
         });
@@ -312,6 +335,9 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
       currentSceneId: null,
       chats: [],
       outlines: [],
+      regenerationPreviewSceneIds: [],
+      regenerationPreviewScenes: [],
+      showRegenerationPreview: false,
       generationEpoch: s.generationEpoch + 1,
       generationStatus: 'idle' as const,
       currentGeneratingOrder: -1,

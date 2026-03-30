@@ -2,7 +2,7 @@
 
 import { useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Play } from 'lucide-react';
+import { Play, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SceneRenderer } from '@/components/stage/scene-renderer';
 import { SceneProvider } from '@/lib/contexts/scene-context';
@@ -19,6 +19,7 @@ interface CanvasAreaProps extends CanvasToolbarProps {
   readonly isPendingScene?: boolean;
   readonly isGenerationFailed?: boolean;
   readonly onRetryGeneration?: () => void;
+  readonly showPreviewBadge?: boolean;
 }
 
 export function CanvasArea({
@@ -45,6 +46,7 @@ export function CanvasArea({
   isPendingScene,
   isGenerationFailed,
   onRetryGeneration,
+  showPreviewBadge,
 }: CanvasAreaProps) {
   const { t } = useI18n();
   const showControls = mode === 'playback' && !whiteboardOpen;
@@ -115,6 +117,13 @@ export function CanvasArea({
               </SceneProvider>
             </div>
           )}
+
+          {showPreviewBadge && currentScene ? (
+            <div className="absolute left-4 top-4 z-[108] inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-white/90 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-700 shadow-sm backdrop-blur dark:border-violet-800 dark:bg-slate-900/90 dark:text-violet-200">
+              <Sparkles className="size-3.5" />
+              {t('classroomOps.previewCanvasActive')}
+            </div>
+          ) : null}
 
           {/* Pending Scene Loading Overlay */}
           <AnimatePresence>

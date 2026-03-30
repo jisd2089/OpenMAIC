@@ -54,6 +54,11 @@ export interface Stage {
   whiteboard?: Whiteboard[];
   // Agent IDs selected when this classroom was created
   agentIds?: string[];
+  editable?: boolean;
+  isDraft?: boolean;
+  revisionId?: string;
+  lastManualEditedAt?: string;
+  lastRegeneratedAt?: string;
 }
 
 /**
@@ -84,6 +89,10 @@ export interface Scene {
 
   // Metadata
   generationContext?: SceneGenerationContext;
+  locked?: boolean;
+  draftSource?: 'manual' | 'regenerate';
+  lastManualEditedAt?: string;
+  lastRegeneratedAt?: string;
   createdAt?: number;
   updatedAt?: number;
 }
@@ -153,3 +162,4 @@ export type {
   GenerationProgress,
   UploadedDocument,
 } from './generation';
+

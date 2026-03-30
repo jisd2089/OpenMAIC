@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   PanelLeftClose,
@@ -11,6 +11,7 @@ import {
   Globe,
   AlertCircle,
   RefreshCw,
+  Sparkles,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ThumbnailSlide } from '@/components/slide-renderer/components/ThumbnailSlide';
@@ -41,8 +42,13 @@ export function SceneSidebar({
   const { scenes, currentSceneId, setCurrentSceneId, generatingOutlines, generationStatus } =
     useStageStore();
   const failedOutlines = useStageStore.use.failedOutlines();
+  const regenerationPreviewSceneIds = useStageStore.use.regenerationPreviewSceneIds();
   const viewportSize = useCanvasStore.use.viewportSize();
   const viewportRatio = useCanvasStore.use.viewportRatio();
+  const previewSceneIdSet = useMemo(
+    () => new Set(regenerationPreviewSceneIds),
+    [regenerationPreviewSceneIds],
+  );
 
   const [retryingOutlineId, setRetryingOutlineId] = useState<string | null>(null);
 
@@ -143,6 +149,7 @@ export function SceneSidebar({
         >
           {scenes.map((scene, index) => {
             const isActive = currentSceneId === scene.id;
+            const isPreviewChanged = previewSceneIdSet.has(scene.id);
             const Icon = getSceneTypeIcon(scene.type);
             const isSlide = scene.type === 'slide';
             const slideContent = isSlide ? (scene.content as SlideContent) : null;
@@ -162,7 +169,9 @@ export function SceneSidebar({
                   'group relative rounded-lg transition-all duration-200 cursor-pointer flex flex-col gap-1 p-1.5',
                   isActive
                     ? 'bg-purple-50 dark:bg-purple-900/20 ring-1 ring-purple-200 dark:ring-purple-700'
-                    : 'hover:bg-gray-50/80 dark:hover:bg-gray-800/50',
+                    : isPreviewChanged
+                      ? 'bg-violet-50/70 ring-1 ring-violet-200 hover:bg-violet-50 dark:bg-violet-950/10 dark:ring-violet-900/50 dark:hover:bg-violet-950/20'
+                      : 'hover:bg-gray-50/80 dark:hover:bg-gray-800/50',
                 )}
               >
                 {/* Scene Header */}
@@ -177,7 +186,7 @@ export function SceneSidebar({
                       )}
                     >
                       {index + 1}
-                    </span>
+                        </span>
                     <span
                       data-testid="scene-title"
                       className={cn(
@@ -190,6 +199,14 @@ export function SceneSidebar({
                       {scene.title}
                     </span>
                   </div>
+                  {isPreviewChanged ? (
+                    <span
+                      title={t('classroomOps.previewReady')}
+                      className="inline-flex items-center gap-1 rounded-full border border-violet-300 bg-violet-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-violet-700 dark:border-violet-800 dark:bg-violet-900/40 dark:text-violet-200"
+                    >
+                      <Sparkles className="size-3" />
+                    </span>
+                  ) : null}
                 </div>
 
                 {/* Thumbnail */}

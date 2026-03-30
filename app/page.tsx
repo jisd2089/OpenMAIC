@@ -21,6 +21,11 @@ import {
   Monitor,
   BotOff,
   ChevronUp,
+  UploadCloud,
+  AlertCircle,
+  CheckCircle2,
+  Loader2,
+  X,
 } from 'lucide-react';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { createLogger } from '@/lib/logger';
@@ -73,6 +78,18 @@ interface FormState {
   webSearch: boolean;
 }
 
+type CourseImportPhase = 'idle' | 'uploading' | 'validating' | 'applying' | 'failed' | 'completed';
+
+interface CourseImportStatus {
+  phase: CourseImportPhase;
+  fileName?: string;
+  jobId?: string;
+  classroomId?: string;
+  message?: string;
+  error?: string;
+  warnings?: string[];
+}
+
 const initialFormState: FormState = {
   pdfFile: null,
   requirement: '',
@@ -84,6 +101,9 @@ function HomePage() {
   const { t, locale, setLocale } = useI18n();
   const { theme, setTheme } = useTheme();
   const router = useRouter();
+  const importCourseInputRef = useRef<HTMLInputElement | null>(null);
+  const [courseImportStatus, setCourseImportStatus] = useState<CourseImportStatus>({ phase: 'idle' });
+  const [courseImportErrorExpanded, setCourseImportErrorExpanded] = useState(false);
   const [form, setForm] = useState<FormState>(initialFormState);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<
@@ -349,6 +369,121 @@ function HomePage() {
     );
   };
 
+  const pollImportJob = async (jobId: string, fileName: string) => {
+    const started = Date.now();
+    while (Date.now() - started < 20000) {
+      const res = await fetch(`/api/classroom/import/${encodeURIComponent(jobId)}`, {
+        cache: 'no-store',
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || t('home.importQueryFailed'));
+      }
+      const job = json.job as {
+        status: string;
+        message?: string;
+        error?: string;
+        validation?: { warnings?: string[] };
+      };
+      setCourseImportStatus({
+        phase: job.status === 'failed' ? 'failed' : 'validating',
+        fileName,
+        jobId,
+        message: job.message || t('home.importValidatingMessage'),
+        warnings: job.validation?.warnings || [],
+        error: job.status === 'failed' ? job.error || t('home.importValidationFailed') : undefined,
+      });
+      if (job.status === 'validated' || job.status === 'failed') {
+        return job;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    throw new Error(t('home.importValidationTimeout'));
+  };
+
+  const handleImportCourse = async (file: File) => {
+    setCourseImportErrorExpanded(false);
+    setCourseImportStatus({
+      phase: 'uploading',
+      fileName: file.name,
+      message: t('home.importUploadingMessage'),
+      warnings: [],
+    });
+    try {
+      const formData = new FormData();
+      formData.set('file', file);
+      formData.set('strategy', 'create-new');
+
+      const createRes = await fetch('/api/classroom/import', {
+        method: 'POST',
+        body: formData,
+      });
+      const createJson = await createRes.json();
+      if (!createRes.ok) {
+        throw new Error(createJson.error || t('home.importCreateFailed'));
+      }
+
+      setCourseImportStatus({
+        phase: 'validating',
+        fileName: file.name,
+        jobId: createJson.jobId as string,
+        message: t('home.importValidatingMessage'),
+        warnings: [],
+      });
+
+      const job = await pollImportJob(createJson.jobId as string, file.name);
+      if (job.status !== 'validated') {
+        throw new Error(job.error || t('home.importValidationFailed'));
+      }
+
+      setCourseImportStatus({
+        phase: 'applying',
+        fileName: file.name,
+        jobId: createJson.jobId as string,
+        message: t('home.importApplyingMessage'),
+        warnings: job.validation?.warnings || [],
+      });
+
+      const applyRes = await fetch(`/api/classroom/import/${encodeURIComponent(createJson.jobId)}/apply`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const applyJson = await applyRes.json();
+      if (!applyRes.ok) {
+        throw new Error(applyJson.error || t('home.importApplyFailed'));
+      }
+
+      setCourseImportStatus({
+        phase: 'completed',
+        fileName: file.name,
+        jobId: createJson.jobId as string,
+        classroomId: applyJson.classroomId as string,
+        message: t('home.importSuccessMessage'),
+        warnings: job.validation?.warnings || [],
+      });
+      toast.success(t('home.importSuccessToast'));
+      await loadClassrooms();
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      router.push(`/classroom/${applyJson.classroomId}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('home.importFailedMessage');
+      log.error('Failed to import course package:', err);
+      setCourseImportStatus((current) => ({
+        ...current,
+        phase: 'failed',
+        error: message,
+        message: current.message || t('home.importFailedMessage'),
+      }));
+      setCourseImportErrorExpanded(true);
+      toast.error(message);
+    } finally {
+      if (importCourseInputRef.current) {
+        importCourseInputRef.current.value = '';
+      }
+    }
+  };
+
   const handleGenerate = async () => {
     // Validate setup before proceeding
     if (!currentModelId) {
@@ -455,6 +590,21 @@ function HomePage() {
     return date.toLocaleDateString();
   };
 
+  const importingCourse = ['uploading', 'validating', 'applying'].includes(
+    courseImportStatus.phase,
+  );
+
+  const courseImportProgress =
+    courseImportStatus.phase === 'uploading'
+      ? 20
+      : courseImportStatus.phase === 'validating'
+        ? 55
+        : courseImportStatus.phase === 'applying'
+          ? 85
+          : courseImportStatus.phase === 'completed'
+            ? 100
+            : 0;
+
   const canGenerate = !!form.requirement.trim();
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -466,6 +616,18 @@ function HomePage() {
 
   return (
     <div className="min-h-[100dvh] w-full bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 flex flex-col items-center p-4 pt-16 md:p-8 md:pt-16 overflow-x-hidden">
+      <input
+        ref={importCourseInputRef}
+        type="file"
+        accept=".zip,.omaic-course.zip"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) {
+            void handleImportCourse(file);
+          }
+        }}
+      />
       {/* Top-right pill (unchanged) */}
       <div
         ref={toolbarRef}
@@ -495,7 +657,7 @@ function HomePage() {
                     'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400',
                 )}
               >
-                ç®€ä½“ä¸­æ–‡
+                ¼òÌåÖÐÎÄ
               </button>
               <button
                 onClick={() => {
@@ -704,6 +866,15 @@ function HomePage() {
                 Workspace
               </button>
 
+
+              <button
+                onClick={() => importCourseInputRef.current?.click()}
+                disabled={importingCourse}
+                className="shrink-0 h-8 rounded-lg border border-border/60 bg-background/80 px-3 text-xs font-medium text-foreground/75 transition hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 inline-flex items-center gap-1.5"
+              >
+                <UploadCloud className="size-3.5" />
+                {importingCourse ? t('home.importingCourse') : t('home.importCourse')}
+              </button>
               {/* Voice input */}
               <SpeechButton
                 size="md"
@@ -731,6 +902,127 @@ function HomePage() {
                 <ArrowUp className="size-3.5" />
               </button>
             </div>
+
+            {courseImportStatus.phase !== 'idle' ? (
+              <div className="mx-3 mb-3 rounded-2xl border border-border/60 bg-background/70 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      {courseImportStatus.phase === 'failed' ? (
+                        <AlertCircle className="size-4 text-destructive" />
+                      ) : courseImportStatus.phase === 'completed' ? (
+                        <CheckCircle2 className="size-4 text-emerald-600" />
+                      ) : (
+                        <Loader2 className="size-4 animate-spin text-blue-600" />
+                      )}
+                      <span>
+                        {courseImportStatus.phase === 'uploading'
+                          ? t('home.importStatusUploading')
+                          : courseImportStatus.phase === 'validating'
+                            ? t('home.importStatusValidating')
+                            : courseImportStatus.phase === 'applying'
+                              ? t('home.importStatusApplying')
+                              : courseImportStatus.phase === 'completed'
+                                ? t('home.importComplete')
+                                : t('home.importFailed')}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {courseImportStatus.fileName || t('home.importPackageDefault')}
+                      {courseImportStatus.jobId
+                        ? ` ¡¤ ${t('home.importJobLabel')} ${courseImportStatus.jobId}`
+                        : ''}
+                      {courseImportStatus.classroomId
+                        ? ` ¡¤ ${t('home.importClassroomLabel')} ${courseImportStatus.classroomId}`
+                        : ''}
+                    </div>
+                    {courseImportStatus.message ? (
+                      <div className="mt-2 text-xs text-foreground/80">{courseImportStatus.message}</div>
+                    ) : null}
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                      {[
+                        { key: 'uploading', label: t('home.importStepUpload'), active: courseImportProgress >= 20 },
+                        { key: 'validating', label: t('home.importStepValidate'), active: courseImportProgress >= 55 },
+                        {
+                          key: 'applying',
+                          label: t('home.importStepApply'),
+                          active: courseImportProgress >= 85 || courseImportStatus.phase === 'completed',
+                        },
+                      ].map((step) => (
+                        <div
+                          key={step.key}
+                          className={cn(
+                            'rounded-lg border px-2 py-1 text-[11px] font-medium transition',
+                            step.active
+                              ? 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-200'
+                              : 'border-border/60 bg-background/60 text-muted-foreground',
+                          )}
+                        >
+                          {step.label}
+                        </div>
+                      ))}
+                    </div>
+                    {courseImportStatus.phase !== 'failed' && courseImportStatus.phase !== 'completed' ? (
+                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-blue-500 transition-all"
+                          style={{ width: `${courseImportProgress}%` }}
+                        />
+                      </div>
+                    ) : null}
+                    {courseImportStatus.warnings?.length ? (
+                      <div className="mt-3 rounded-xl border border-amber-200/70 bg-amber-50/80 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
+                        <div className="font-medium">{t('home.importWarnings')}</div>
+                        <ul className="mt-1 space-y-1">
+                          {courseImportStatus.warnings.map((warning, index) => (
+                            <li key={`${warning}-${index}`}>- {warning}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {courseImportStatus.error ? (
+                      <div className="mt-3 rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium">{t('home.importFailed')}</span>
+                          <button
+                            onClick={() => setCourseImportErrorExpanded((open) => !open)}
+                            className="text-[11px] font-medium underline-offset-2 transition hover:underline"
+                          >
+                            {courseImportErrorExpanded ? t('home.importHideDetails') : t('home.importShowDetails')}
+                          </button>
+                        </div>
+                        {courseImportErrorExpanded ? (
+                          <pre className="mt-2 whitespace-pre-wrap break-words font-sans text-[11px]">
+                            {courseImportStatus.error}
+                          </pre>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                  {(courseImportStatus.phase === 'failed' || courseImportStatus.phase === 'completed') ? (
+                    <div className="flex items-center gap-2">
+                      {courseImportStatus.phase === 'failed' ? (
+                        <button
+                          onClick={() => importCourseInputRef.current?.click()}
+                          className="rounded-lg border border-border/60 bg-background px-2.5 py-1 text-[11px] font-medium text-foreground/80 transition hover:bg-muted"
+                        >
+                          {t('home.importRetry')}
+                        </button>
+                      ) : null}
+                      <button
+                        onClick={() => {
+                          setCourseImportErrorExpanded(false);
+                          setCourseImportStatus({ phase: 'idle' });
+                        }}
+                        className="rounded-full p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                      >
+                        <X className="size-4" />
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
 
             <AnimatePresence>
               {retrievalPanelOpen && (
@@ -1359,7 +1651,7 @@ function ClassroomCard({
         ) : !slide ? (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="size-12 rounded-2xl bg-gradient-to-br from-violet-100 to-blue-100 dark:from-violet-900/30 dark:to-blue-900/30 flex items-center justify-center">
-              <span className="text-xl opacity-50">ðŸ“„</span>
+              <span className="text-xl opacity-50">??</span>
             </div>
           </div>
         ) : null}
@@ -1424,7 +1716,7 @@ function ClassroomCard({
       {/* Info - outside the thumbnail */}
         <div className="mt-2.5 px-1 flex items-center gap-2">
           <span className="shrink-0 inline-flex items-center rounded-full bg-violet-100 dark:bg-violet-900/30 px-2 py-0.5 text-[11px] font-medium text-violet-600 dark:text-violet-400">
-            {classroom.sceneCount} {t('classroom.slides')} Â· {formatDate(classroom.updatedAt)}
+            {classroom.sceneCount} {t('classroom.slides')} ¡¤ {formatDate(classroom.updatedAt)}
           </span>
           {classroom.knowledgeBaseCount ? (
             <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
@@ -1478,3 +1770,9 @@ function ClassroomCard({
 export default function Page() {
   return <HomePage />;
 }
+
+
+
+
+
+

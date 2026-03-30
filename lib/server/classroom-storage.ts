@@ -5,6 +5,14 @@ import type { Scene, Stage } from '@/lib/types/stage';
 
 export const CLASSROOMS_DIR = path.join(process.cwd(), 'data', 'classrooms');
 export const CLASSROOM_JOBS_DIR = path.join(process.cwd(), 'data', 'classroom-jobs');
+export const COURSE_EXPORTS_DIR = path.join(process.cwd(), 'data', 'course-exports');
+export const COURSE_IMPORTS_DIR = path.join(process.cwd(), 'data', 'course-imports');
+export const CLASSROOM_REVISIONS_DIR = path.join(process.cwd(), 'data', 'classroom-revisions');
+export const CLASSROOM_REGENERATION_JOBS_DIR = path.join(
+  process.cwd(),
+  'data',
+  'classroom-regeneration-jobs',
+);
 
 async function ensureDir(dir: string) {
   await fs.mkdir(dir, { recursive: true });
@@ -16,6 +24,22 @@ export async function ensureClassroomsDir() {
 
 export async function ensureClassroomJobsDir() {
   await ensureDir(CLASSROOM_JOBS_DIR);
+}
+
+export async function ensureCourseExportsDir() {
+  await ensureDir(COURSE_EXPORTS_DIR);
+}
+
+export async function ensureCourseImportsDir() {
+  await ensureDir(COURSE_IMPORTS_DIR);
+}
+
+export async function ensureClassroomRevisionsDir() {
+  await ensureDir(CLASSROOM_REVISIONS_DIR);
+}
+
+export async function ensureClassroomRegenerationJobsDir() {
+  await ensureDir(CLASSROOM_REGENERATION_JOBS_DIR);
 }
 
 export async function writeJsonFileAtomic(filePath: string, data: unknown) {
@@ -45,10 +69,33 @@ export function isValidClassroomId(id: string): boolean {
   return /^[a-zA-Z0-9_-]+$/.test(id);
 }
 
+export function classroomUrl(baseUrl: string, id: string): string {
+  return `${baseUrl}/classroom/${id}`;
+}
+
+export function classroomJsonPath(id: string): string {
+  return path.join(CLASSROOMS_DIR, `${id}.json`);
+}
+
+export function classroomDir(id: string): string {
+  return path.join(CLASSROOMS_DIR, id);
+}
+
+export function classroomMediaDir(id: string): string {
+  return path.join(classroomDir(id), 'media');
+}
+
+export function classroomAudioDir(id: string): string {
+  return path.join(classroomDir(id), 'audio');
+}
+
+export function classroomRevisionsDir(id: string): string {
+  return path.join(CLASSROOM_REVISIONS_DIR, id);
+}
+
 export async function readClassroom(id: string): Promise<PersistedClassroomData | null> {
-  const filePath = path.join(CLASSROOMS_DIR, `${id}.json`);
   try {
-    const content = await fs.readFile(filePath, 'utf-8');
+    const content = await fs.readFile(classroomJsonPath(id), 'utf-8');
     return JSON.parse(content) as PersistedClassroomData;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -65,20 +112,20 @@ export async function persistClassroom(
     scenes: Scene[];
   },
   baseUrl: string,
+  options?: { createdAt?: string },
 ): Promise<PersistedClassroomData & { url: string }> {
   const classroomData: PersistedClassroomData = {
     id: data.id,
     stage: data.stage,
     scenes: data.scenes,
-    createdAt: new Date().toISOString(),
+    createdAt: options?.createdAt || new Date().toISOString(),
   };
 
   await ensureClassroomsDir();
-  const filePath = path.join(CLASSROOMS_DIR, `${data.id}.json`);
-  await writeJsonFileAtomic(filePath, classroomData);
+  await writeJsonFileAtomic(classroomJsonPath(data.id), classroomData);
 
   return {
     ...classroomData,
-    url: `${baseUrl}/classroom/${data.id}`,
+    url: classroomUrl(baseUrl, data.id),
   };
 }

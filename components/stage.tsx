@@ -49,8 +49,15 @@ export function Stage({
   const { mode, getCurrentScene, scenes, currentSceneId, setCurrentSceneId, generatingOutlines } =
     useStageStore();
   const failedOutlines = useStageStore.use.failedOutlines();
+  const regenerationPreviewScenes = useStageStore.use.regenerationPreviewScenes();
+  const showRegenerationPreview = useStageStore.use.showRegenerationPreview();
 
   const currentScene = getCurrentScene();
+  const previewScene = useMemo(() => {
+    if (!currentSceneId || !showRegenerationPreview) return null;
+    return regenerationPreviewScenes.find((scene) => scene.id === currentSceneId) || null;
+  }, [currentSceneId, regenerationPreviewScenes, showRegenerationPreview]);
+  const displayScene = previewScene || currentScene;
 
   // Layout state from settings store (persisted via localStorage)
   const sidebarCollapsed = useSettingsStore((s) => s.sidebarCollapsed);
@@ -939,7 +946,12 @@ export function Stage({
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col overflow-hidden min-w-0 relative">
         {/* Header */}
-        {!isPresenting && <Header currentSceneTitle={currentScene?.title || ''} />}
+        {!isPresenting && (
+          <Header
+            currentSceneTitle={displayScene?.title || ''}
+            showPreviewBadge={Boolean(previewScene)}
+          />
+        )}
 
         {/* Canvas Area */}
         <div
@@ -950,7 +962,7 @@ export function Stage({
           suppressHydrationWarning
         >
           <CanvasArea
-            currentScene={currentScene}
+            currentScene={displayScene}
             currentSceneIndex={currentSceneIndex}
             scenesCount={totalScenesCount}
             mode={mode}
@@ -979,6 +991,7 @@ export function Stage({
             isGenerationFailed={
               isPendingScene && failedOutlines.some((f) => f.id === generatingOutlines[0]?.id)
             }
+            showPreviewBadge={Boolean(previewScene)}
             onRetryGeneration={
               onRetryOutline && generatingOutlines[0]
                 ? () => onRetryOutline(generatingOutlines[0].id)
