@@ -382,6 +382,23 @@ describe('fetchServerProviders — provider availability sync', () => {
     expect(store.getState().modelId).toBe('gpt-4o');
   });
 
+  it('auto-selects the first available model when provider is usable but modelId is empty', async () => {
+    const store = await getStore();
+
+    // Simulate a previously configured provider with an empty model selection.
+    store.getState().setModel('openai', '');
+
+    mockServerResponse({
+      providers: {
+        openai: { models: ['gpt-4o', 'gpt-4o-mini'] },
+      },
+    });
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().providerId).toBe('openai');
+    expect(store.getState().modelId).toBe('gpt-4o');
+  });
+
   // ---- Error handling ----
 
   it('does not modify state when fetch returns non-ok response', async () => {

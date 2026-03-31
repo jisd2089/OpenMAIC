@@ -115,6 +115,28 @@ describe('classroom patch, revision, and regeneration routes', () => {
     await teardownIsolatedWorkspace(workspaceRoot);
   });
 
+  it('creates a draft classroom when PATCH saves a local-only classroom for the first time', async () => {
+    const classroomRoute = await import('@/app/api/classroom/[id]/route');
+    const { readClassroom } = await import('@/lib/server/classroom-storage');
+
+    const classroomId = 'local_only_course';
+    const response = await classroomRoute.PATCH(
+      createJsonRequest(`http://localhost/api/classroom/${classroomId}`, 'PATCH', {
+        stage: buildStage('temporary_local_id'),
+        scenes: buildScenes('temporary_local_id'),
+        saveMode: 'draft',
+      }),
+      { params: Promise.resolve({ id: classroomId }) },
+    );
+
+    expect(response.status).toBe(200);
+    const saved = await readClassroom(classroomId);
+    expect(saved?.stage.id).toBe(classroomId);
+    expect(saved?.stage.name).toBe('Editable Course');
+    expect(saved?.stage.isDraft).toBe(true);
+    expect(saved?.scenes[0].stageId).toBe(classroomId);
+  });
+
   it('supports patch save, revision create/restore, and regeneration preview/apply/discard', async () => {
     const classroomRoute = await import('@/app/api/classroom/[id]/route');
     const revisionsRoute = await import('@/app/api/classroom/[id]/revisions/route');
@@ -236,6 +258,39 @@ describe('classroom patch, revision, and regeneration routes', () => {
     const regenerated = await readClassroom(classroomId);
     expect(regenerated?.scenes[0].title).toContain('(Reworked)');
     expect(regenerated?.stage.lastRegeneratedAt).toBeTruthy();
+
+    const revisionsAfterApplyResponse = await revisionsRoute.GET(
+      createGetRequest(`http://localhost/api/classroom/${classroomId}/revisions?page=1&pageSize=10`),
+      { params: Promise.resolve({ id: classroomId }) },
+    );
+    const revisionsAfterApplyBody = await revisionsAfterApplyResponse.json();
+    expect(revisionsAfterApplyBody.total).toBe(3);
+    const appliedRevision = revisionsAfterApplyBody.revisions.find(
+      (revision: { summary?: string }) => revision.summary === `Applied regeneration job ${regenerationJobId}`,
+    );
+    expect(appliedRevision).toBeTruthy();
+
+    await restoreRevisionRoute.POST(
+      createJsonRequest(
+        `http://localhost/api/classroom/${classroomId}/revisions/${revisionId}/restore`,
+        'POST',
+        {},
+      ),
+      { params: Promise.resolve({ id: classroomId, revisionId }) },
+    );
+    const restoredDraft = await readClassroom(classroomId);
+    expect(restoredDraft?.scenes[0].title).toBe('Draft Title');
+
+    await restoreRevisionRoute.POST(
+      createJsonRequest(
+        `http://localhost/api/classroom/${classroomId}/revisions/${appliedRevision.id}/restore`,
+        'POST',
+        {},
+      ),
+      { params: Promise.resolve({ id: classroomId, revisionId: appliedRevision.id }) },
+    );
+    const restoredApplied = await readClassroom(classroomId);
+    expect(restoredApplied?.scenes[0].title).toContain('(Reworked)');
 
     scheduledCallbacks.length = 0;
     afterMock.mockClear();

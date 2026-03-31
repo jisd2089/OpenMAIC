@@ -143,6 +143,52 @@ providers:
     });
   });
 
+  describe('preferred configured providers', () => {
+    it('returns the first configured LLM model string', async () => {
+      yamlOverride = `
+providers:
+  deepseek:
+    apiKey: sk-deepseek
+    models:
+      - deepseek-chat
+`;
+      const { getPreferredServerLLMProviderId, getPreferredServerModelString } = await import(
+        '@/lib/server/provider-config'
+      );
+
+      expect(getPreferredServerLLMProviderId()).toBe('deepseek');
+      expect(getPreferredServerModelString()).toBe('deepseek:deepseek-chat');
+    });
+
+    it('returns the first configured ASR/TTS/Image/Video provider ids', async () => {
+      yamlOverride = `
+tts:
+  qwen-tts:
+    apiKey: sk-qwen-tts
+asr:
+  qwen-asr:
+    apiKey: sk-qwen-asr
+image:
+  qwen-image:
+    apiKey: sk-qwen-image
+video:
+  kling:
+    apiKey: sk-kling
+`;
+      const {
+        getPreferredServerTTSProviderId,
+        getPreferredServerASRProviderId,
+        getPreferredServerImageProviderId,
+        getPreferredServerVideoProviderId,
+      } = await import('@/lib/server/provider-config');
+
+      expect(getPreferredServerTTSProviderId()).toBe('qwen-tts');
+      expect(getPreferredServerASRProviderId()).toBe('qwen-asr');
+      expect(getPreferredServerImageProviderId()).toBe('qwen-image');
+      expect(getPreferredServerVideoProviderId()).toBe('kling');
+    });
+  });
+
   describe('env var model parsing', () => {
     it('splits comma-separated models and trims whitespace', async () => {
       vi.stubEnv('OPENAI_API_KEY', 'sk-test');

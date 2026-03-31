@@ -298,17 +298,269 @@ checksums.json
 1. 同一浏览器会话内以后写为准
 2. 如果服务端版本号已变化，前端保存时提示“需刷新或另存副本”
 
+### 7.5.1 直接编辑入口问题
+
+当前课堂页的中间主区域默认承载“播放 / 讲解”能力，用户看到的是课程播放按钮和讲解控制，不具备直接编辑可操作性。
+
+这会带来两个问题：
+
+1. 用户已在左侧选中目标页面，但无法判断“编辑入口”到底在哪里
+2. 如果直接在当前播放画布上叠加编辑交互，会干扰现有的讲解、播放、暂停、翻页等课堂行为
+
+因此 `v0.2` 的直接编辑方案必须遵循：
+
+1. 不改掉原有播放讲解链路
+2. 不让播放态和编辑态共享同一套交互热区
+3. 必须给出显式、可理解的“进入编辑”与“返回播放”入口
+
+### 7.5.2 双工作区模式
+
+课堂页主区域拆成两种互斥模式：
+
+1. `present`
+   - 默认模式
+   - 保持当前课程播放、讲解、暂停、继续、翻页、讨论等能力不变
+2. `edit`
+   - 手动编辑模式
+   - 中间主区域切换为当前页编辑画布，不再显示播放讲解按钮
+
+模式切换原则：
+
+1. 默认进入课堂时仍为 `present`
+2. 用户只能通过显式入口进入 `edit`
+3. `present` 和 `edit` 不能同时对中间画布生效
+4. 从 `edit` 返回 `present` 后，应恢复原有课堂播放体验，而不是进入新的页面结构
+
+建议新增前端状态：
+
+1. `workspaceMode: 'present' | 'edit'`
+2. `editingSceneId?: string | null`
+3. `editorDirty: boolean`
+4. `editorSelection?: { elementId?: string; panel?: string }`
+
+### 7.5.3 编辑入口与退出入口
+
+推荐入口放在两个位置，但只维护一套状态：
+
+1. `课堂操作` 页签顶部增加 `编辑当前页` 主按钮
+   - 仅当左侧已选中有效页面时可点击
+   - 点击后进入 `edit`
+2. 课堂顶部工具栏增加 `返回播放` / `结束编辑` 次入口
+   - 仅在 `edit` 模式显示
+
+推荐文案：
+
+1. `编辑当前页`
+2. `返回播放`
+3. `正在编辑：第 N 页 - <title>`
+
+交互约束：
+
+1. 若当前页不存在，则 `编辑当前页` 按钮禁用
+2. 若当前页已有未保存改动，切换页面或退出编辑时需提示保存、放弃或取消
+3. 若正在播放讲解，点击 `编辑当前页` 时先终止当前播放会话，再进入编辑态
+4. `课堂操作` 仍保留保存、快照、导出、重制能力，但不直接承载主画布编辑控件
+
+### 7.5.4 编辑态布局
+
+编辑态保持三栏结构不变，只切换中间主区域的内容：
+
+1. 左侧：幻灯片导航
+   - 保持可见
+   - 仍是当前编辑页的唯一选择来源
+2. 中间：编辑画布
+   - 替换原播放讲解主画布
+   - 显示当前页的可编辑元素与编辑辅助框
+3. 右侧：`课堂操作 / 笔记 / 对话`
+   - 继续保留
+   - `课堂操作` 中显示当前编辑页状态、保存入口与返回播放入口
+
+编辑态中间区域建议拆成两层：
+
+1. `SlideEditorCanvas`
+   - 负责元素选中、拖拽、缩放、重排、对齐辅助线
+2. `InspectorPanel`
+   - 负责属性编辑
+   - 可放在中间画布右侧内嵌区域，或复用右侧栏中的特定子区块
+
+### 7.5.5 不同页面类型的编辑策略
+
+`slide` 页面：
+
+1. 支持选中文本、图片、视频、形状、白板引用等元素
+2. 支持拖拽位置、调整尺寸、修改层级
+3. 支持双击文本进入行内编辑
+4. 支持替换图片/视频资源
+
+`quiz / interactive / pbl` 页面：
+
+1. 不强制做自由画布编辑
+2. 采用结构化表单编辑
+3. 在中间主区域显示当前页预览，在侧边属性区修改题干、选项、步骤、提示文案、互动配置
+
+`actions / 讲稿 / 页面备注`：
+
+1. 作为当前页编辑的一部分，在编辑态中提供折叠面板
+2. 不与播放态中的讲解控制复用同一组件
+
+### 7.5.6 编辑态与播放态的切换规则
+
+从 `present -> edit`：
+
+1. 记录当前 `currentSceneId`
+2. 停止当前讲解、语音播报、讨论或自动播放流程
+3. 切换主区域为编辑画布
+4. 将 `editingSceneId` 设为当前页
+5. 高亮顶部“正在编辑”状态条
+
+从 `edit -> present`：
+
+1. 若存在未保存改动，弹出确认
+2. 保留当前 `currentSceneId`
+3. 销毁编辑态选中框、拖拽状态和属性面板上下文
+4. 恢复原播放主画布与播放讲解控制
+5. 不自动开始讲解，由用户自行点击播放
+
+### 7.5.7 与左侧导航联动
+
+左侧导航仍然是当前编辑页的唯一来源。
+
+规则：
+
+1. 在 `edit` 模式切换左侧页面时，主画布切换为新页面编辑内容
+2. 若当前页有未保存改动，先弹出确认框
+3. `课堂操作` 中的“当前作用页面”与编辑态顶部状态条同步更新
+4. 后续 `重制当前页` 默认作用于当前左侧选中页，而不是独立的编辑页副本
+
+### 7.5.8 保存与版本策略
+
+直接编辑仍复用现有保存链路，但增加编辑态语义：
+
+1. 编辑态中的变更实时写入前端 store
+2. 前端继续防抖写 IndexedDB
+3. 用户通过 `Save Draft` / `Publish` 显式提交到服务端
+4. 用户可在进入大改前先手动创建 `Snapshot`
+5. 恢复历史版本后，若重新进入编辑态，应以恢复后的内容为准
+
+推荐额外补充：
+
+1. 编辑态顶部显示 `Unsaved changes`
+2. 保存成功后显示最近保存时间
+3. 切换页面、退出编辑、恢复版本前都检查 `editorDirty`
+
+### 7.5.9 前端组件拆分建议
+
+建议新增或调整：
+
+1. `ClassroomWorkspaceShell`
+   - 统一管理 `present / edit` 模式
+2. `EditCurrentSceneButton`
+   - 放在 `课堂操作` 内
+3. `SlideEditorCanvas`
+   - 画布编辑容器
+4. `SceneInspector`
+   - 当前页属性面板
+5. `EditModeBanner`
+   - 显示“正在编辑第 N 页”与“返回播放”
+
+现有组件分工：
+
+1. `Stage`
+   - 继续承载播放讲解能力
+2. `SceneSidebar`
+   - 继续作为当前页来源
+3. `ClassroomOpsPanel`
+   - 增加进入/退出编辑的操作入口和保存态展示
+
+### 7.5.10 编辑态流程图
+
+```mermaid
+flowchart LR
+  A[默认进入课堂] --> B[present 播放态]
+  B --> C[左侧选中目标页]
+  C --> D[课堂操作 点击 编辑当前页]
+  D --> E[停止当前播放会话]
+  E --> F[切换为 edit 编辑态]
+  F --> G[中间显示 SlideEditorCanvas]
+  G --> H[修改元素/文本/属性]
+  H --> I[Save Draft 或 Publish]
+  H --> J[Snapshot]
+  I --> K[退出编辑 返回播放]
+  J --> H
+  K --> B
+```
+
 ### 7.6 对话重制设计
 
 #### 7.6.1 入口
 
-课堂页新增 `Rework with Prompt` 入口，支持：
+课堂页通过统一的 `课堂操作` 入口承载保存、快照、导出和 `Rework with Prompt` 能力。
+
+入口形态：
+
+1. 位于右侧栏，与 `笔记`、`对话` 作为同级 tab 切换
+2. 切换后在右侧栏内展示操作内容，不再额外弹出独立面板
+3. 默认不抢占课堂主画布区域
+4. 切换后不能覆盖左侧页面导航区域
+
+在该入口内支持：
 
 1. 页面级重制
 2. 整课重制
 3. 当前选中元素局部重制
 
-#### 7.6.2 请求结构
+#### 7.6.2 当前作用对象与左侧导航联动
+
+`课堂操作` 内的“当前页”不是独立状态，而是直接复用课堂主 store 中的 `currentSceneId`。
+
+联动原则：
+
+1. 左侧导航点击页面时，`SceneSidebar` 更新 `currentSceneId`
+2. `课堂操作` 面板订阅同一个 `currentSceneId`
+3. 面板内展示当前作用页面卡片：
+   - 页面序号
+   - 页面标题
+   - 页面类型
+   - 是否存在预览变更
+4. 点击 `重制当前页` 时，始终以当前 `currentSceneId` 组装 `targetType=scene` 与 `targetId`
+5. 如果用户在任务创建后切换页面，不影响已经提交任务的目标页，任务以提交瞬间快照为准
+
+交互约束：
+
+1. 未选中页面时，`重制当前页` 按钮禁用
+2. 页面切换后，当前作用页面卡片立即刷新
+3. 如果当前页面已存在重制预览，面板内需显示“当前页存在预览结果”的提示
+
+#### 7.6.3 创建任务前的服务端真值校验
+
+当前 `POST /api/classroom/:id/regenerate` 依赖服务端课堂文件作为真值来源。
+
+因此在前端发起“重制当前页”或“重制整门课”前，必须增加一层前置校验：
+
+1. 先确认 `/api/classroom/:id` 可读
+2. 如果服务端课堂不存在，但前端本地 store 中已有 `stage/scenes`
+   - 先执行一次 `PATCH /api/classroom/:id`
+   - 使用当前本地 `stage/scenes`
+   - `saveMode='draft'`
+3. 草稿保存成功后，再继续创建重制任务
+4. 若草稿保存失败，直接中断创建任务，并提示“请先保存课堂后再重试”
+
+该设计解决的问题：
+
+1. 课堂仅存在 IndexedDB、本地已可编辑，但服务端尚未落盘时，直接重制会命中 `Classroom not found`
+2. 将“生成后的立即人工介入”和“服务端真值驱动的重制任务”串成一条连续链路
+
+前端状态机：
+
+1. `idle`
+2. `checking-server-classroom`
+3. `saving-draft-before-regenerate`
+4. `creating-regeneration-job`
+5. `polling-preview`
+6. `preview-ready`
+7. `failed`
+
+#### 7.6.4 请求结构
 
 对话重制请求需要包含：
 
@@ -330,16 +582,150 @@ checksums.json
    - 选中页面内容
    - 相关知识库/记忆摘要
 
-#### 7.6.3 执行流程
+针对“重制当前页”的补充约束：
 
-1. 用户输入提示词
-2. 前端发送重制请求
-3. 服务端创建重制任务
-4. 模型根据范围生成新的 `stage/scene/element` 草稿结果
-5. 返回 diff 摘要或草稿版本
-6. 用户确认后应用到当前草稿
+1. `targetType='scene'`
+2. `targetId` 必须来自当前 `currentSceneId`
+3. 前端创建任务时应同步记录：
+   - `sceneTitle`
+   - `sceneOrder`
+   - 提交时间
+4. 这些附加信息主要用于 UI 展示和任务关联，不改变服务端以 `targetId` 为准的原则
 
-#### 7.6.4 覆盖策略
+#### 7.6.5 执行流程
+
+1. 用户在左侧导航选中目标页面
+2. `课堂操作` 面板显示当前作用页面
+3. 用户输入提示词
+4. 前端检查课堂服务端真值是否存在
+5. 如不存在，则先自动保存当前草稿
+6. 前端发送重制请求
+7. 服务端创建重制任务
+8. 服务端根据当前 provider 配置解析本次重制使用的默认 LLM
+9. LLM 先根据范围生成新的 `stage/scene/element` 草稿结果
+10. 若目标页原本存在图片或视频元素，服务端继续组装媒体生成请求，并调用已配置可用的图片/视频模型补齐预览资源
+11. 若目标页包含讲稿或旁白，服务端继续调用已配置可用的 TTS 模型补齐预览音频
+12. 服务端按阶段写入任务进度：`preparing`、`resolving-model`、`generating-scene`、`generating-media`、`generating-tts`、`assembling-preview`
+13. 前端轮询任务状态，并在 `课堂操作` 中显示加载动画、进度条和当前阶段文案
+14. 返回 diff 摘要或草稿版本
+15. 用户确认后应用到当前草稿
+
+重制阶段的多媒体补齐需要遵循统一实现约束：
+
+1. 图片、视频、TTS 不允许各自维护独立的“重制专用” provider 调用分支
+2. 重制阶段必须复用与常规生成阶段一致的服务端 helper
+3. 图片生成前需先将 `aspectRatio` 归一化为明确的 `width/height`
+4. 视频生成前需先按 provider 能力归一化 `duration / aspectRatio / resolution`
+5. TTS 文件扩展名必须以真实返回格式为准，而不是以 provider 默认支持格式硬编码
+6. 图片、视频、TTS 的生成日志应分别统一为：
+   - `Generating image: provider=..., model=..., prompt=..., size=...`
+   - `Generating video: provider=..., model=..., prompt=..., duration=..., aspect=..., resolution=...`
+   - `Generating TTS: provider=..., voice=..., audioId=..., textLen=...`
+7. 重制阶段的日志标签允许不同于普通接口标签，但日志内容字段必须保持一致，便于联调和排障
+
+重制当前页时序图：
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant FE as Classroom Ops Panel
+  participant API as Classroom API
+  participant JOB as Regeneration Job
+  participant LLM as Configured LLM
+  participant MM as Image/Video Providers
+  participant TTS as TTS Provider
+  participant REV as Revision Store
+
+  U->>FE: 在左侧导航选中页面并输入提示词
+  FE->>API: GET /api/classroom/:id
+  alt 服务端课堂不存在
+    FE->>API: PATCH /api/classroom/:id saveMode=draft
+    API-->>FE: draft persisted
+  else 服务端课堂已存在
+    API-->>FE: classroom exists
+  end
+
+  FE->>API: POST /api/classroom/:id/regenerate
+  API->>JOB: create job(step=queued)
+  API-->>FE: jobId
+
+  loop 轮询状态
+    FE->>API: GET /api/classroom/:id/regenerate/:jobId
+    API-->>FE: status + step + message
+  end
+
+  JOB->>JOB: preparing
+  JOB->>JOB: resolving-model
+  JOB->>LLM: generate preview scenes
+  LLM-->>JOB: regenerated content
+  opt 原页面包含图片或视频
+    JOB->>MM: generate media assets
+    MM-->>JOB: media urls
+  end
+  opt 页面包含讲稿或旁白
+    JOB->>TTS: generate narration audio
+    TTS-->>JOB: audio urls
+  end
+  JOB->>JOB: assembling-preview
+  JOB-->>API: preview-ready
+
+  U->>FE: 点击应用重制结果
+  FE->>API: POST /api/classroom/:id/regenerate/:jobId/apply
+  API->>REV: create pre-regenerate revision
+  API->>REV: create Applied regeneration job revision
+  API-->>FE: applied=true
+```
+
+### 7.6.1 公式渲染告警收敛
+
+当前课程生成和白板动作都会在服务端将 LaTeX 公式渲染为 KaTeX HTML。
+
+已知问题：
+
+1. 当 display math 中出现 `\\` 或 `\newline` 时，KaTeX 会输出 `newLineInDisplayMode`
+2. 该问题通常不影响页面实际渲染，但会在服务端日志中重复刷屏
+3. 若不收敛，会干扰重制链路和课堂回放链路的真实错误排查
+
+`v0.2` 需要采用统一渲染 helper：
+
+1. 课程生成阶段的公式元素渲染与白板 `wb_draw_latex` 必须共用同一 helper
+2. 统一使用 `displayMode: true`
+3. 仅对 `newLineInDisplayMode` 这类已知兼容性 strict code 做忽略处理
+4. 其他 KaTeX 渲染问题仍保持 `warn` 或错误日志，不允许整体关闭严格模式
+
+这样可以保证：
+
+1. 页面公式与白板公式渲染行为一致
+2. 兼容旧数据中已存在的 `\\` 写法
+3. 不因可忽略告警污染部署与重制任务日志
+
+重制任务阶段状态图：
+
+```mermaid
+stateDiagram-v2
+  [*] --> queued
+  queued --> preparing
+  preparing --> resolving_model
+  resolving_model --> generating_scene
+  generating_scene --> generating_media: has media placeholders
+  generating_scene --> generating_tts: no media, has narration
+  generating_scene --> assembling_preview: text/layout only
+  generating_media --> generating_tts: has narration
+  generating_media --> assembling_preview: no narration
+  generating_tts --> assembling_preview
+  assembling_preview --> preview_ready
+  queued --> failed
+  preparing --> failed
+  resolving_model --> failed
+  generating_scene --> failed
+  generating_media --> failed
+  generating_tts --> failed
+  assembling_preview --> failed
+  preview_ready --> applied
+  preview_ready --> discarded
+```
+
+#### 7.6.6 覆盖策略
 
 支持两类策略：
 
@@ -354,7 +740,7 @@ checksums.json
 2. 页面级
 3. 元素级
 
-#### 7.6.5 结果应用
+#### 7.6.7 结果应用
 
 对话重制结果不直接写正式版本。
 
@@ -362,7 +748,23 @@ checksums.json
 
 1. 先生成草稿
 2. 用户预览
-3. 用户选择应用、丢弃、继续追问修改
+3. 应用前先创建一份 `pre-regenerate` 快照，作为恢复点
+4. 应用成功后再额外创建一份 `Applied regeneration job <jobId>` 的系统版本
+5. 当前 `stage.revisionId` 指向最新已应用重制版本
+6. 用户可恢复旧版本，也可再次恢复到某次已应用的重制结果
+7. 用户仍可选择丢弃本次预览，且不影响历史版本链
+
+历史版本与重制结果回切图：
+
+```mermaid
+flowchart LR
+  A[当前草稿] --> B[pre-regenerate revision]
+  B --> C[preview-ready]
+  C --> D[Applied regeneration job revision]
+  D --> E[当前课堂 revisionId 指向 D]
+  E --> F[恢复旧版本]
+  F --> G[从历史版本列表重新恢复 D]
+```
 
 ## 8. 版本快照设计
 
@@ -521,12 +923,25 @@ data/
 
 新增：
 
-1. `Edit` 模式入口
-2. `Save Draft`
-3. `Revision History`
-4. `Export Course`
-5. `Rework with Prompt`
-6. 重制结果预览与应用按钮
+1. `课堂操作` 页签
+2. 与 `笔记`、`对话` 同级的右侧栏切换组
+3. `Save Draft`
+4. `Revision History`
+5. `Export Course`
+6. `Rework with Prompt`
+7. 重制结果预览与应用按钮
+8. 当前作用页面联动卡片
+
+布局约束：
+
+1. 切换到 `课堂操作` 时，左侧页面导航保持可见
+2. 课堂主画布与左侧导航不因 `课堂操作` 页签而被固定遮挡
+
+联动约束：
+
+1. 左侧页面导航是“重制当前页”的唯一页面选择来源
+2. `课堂操作` 不再维护第二套独立页面选择状态
+3. 当前作用页面信息需在右侧栏内始终可见
 
 ### 11.3 编辑器行为
 

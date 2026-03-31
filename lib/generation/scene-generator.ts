@@ -6,7 +6,6 @@
  */
 
 import { nanoid } from 'nanoid';
-import katex from 'katex';
 import { MAX_VISION_IMAGES } from '@/lib/constants/generation';
 import type {
   SceneOutline,
@@ -26,6 +25,7 @@ import { buildPrompt, PROMPT_IDS } from './prompts';
 import { postProcessInteractiveHtml } from './interactive-post-processor';
 import { parseActionsFromStructuredOutput } from './action-parser';
 import { parseJsonResponse } from './json-repair';
+import { renderKatexToHtml } from '@/lib/utils/katex';
 import {
   buildCourseContext,
   formatAgentsForPrompt,
@@ -441,11 +441,7 @@ function processLatexElements(
       }
 
       try {
-        const html = katex.renderToString(latexStr, {
-          throwOnError: false,
-          displayMode: true,
-          output: 'html',
-        });
+        const html = renderKatexToHtml(latexStr);
 
         return {
           ...el,

@@ -16,7 +16,6 @@
  */
 
 import { NextRequest } from 'next/server';
-import { generateImage, aspectRatioToDimensions } from '@/lib/media/image-providers';
 import { resolveImageApiKey, resolveImageBaseUrl } from '@/lib/server/provider-config';
 import type { ImageProviderId, ImageGenerationOptions } from '@/lib/media/types';
 import { createLogger } from '@/lib/logger';
@@ -24,6 +23,7 @@ import { apiError, apiSuccess, API_ERROR_CODES } from '@/lib/server/api-response
 import { parseJsonRequestWithSchema } from '@/lib/server/http-validation';
 import { imageGenerationRequestSchema } from '@/lib/server/generation/contracts';
 import { validateUrlForSSRF } from '@/lib/server/ssrf-guard';
+import { generateImageWithLogging } from '@/lib/server/image-generation';
 
 const log = createLogger('ImageGeneration API');
 
@@ -62,19 +62,11 @@ export async function POST(request: NextRequest) {
 
     const baseUrl = clientBaseUrl ? clientBaseUrl : resolveImageBaseUrl(providerId, clientBaseUrl);
 
-    // Resolve dimensions from aspect ratio if not explicitly set
-    if (!body.width && !body.height && body.aspectRatio) {
-      const dims = aspectRatioToDimensions(body.aspectRatio);
-      body.width = dims.width;
-      body.height = dims.height;
-    }
-
-    log.info(
-      `Generating image: provider=${providerId}, model=${clientModel || 'default'}, ` +
-        `prompt="${body.prompt.slice(0, 80)}...", size=${body.width ?? 'auto'}x${body.height ?? 'auto'}`,
+    const result = await generateImageWithLogging(
+      { providerId, apiKey, baseUrl, model: clientModel },
+      body,
+      log,
     );
-
-    const result = await generateImage({ providerId, apiKey, baseUrl, model: clientModel }, body);
 
     return apiSuccess({ result });
   } catch (error) {

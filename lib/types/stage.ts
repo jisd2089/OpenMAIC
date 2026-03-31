@@ -8,6 +8,8 @@ export type SceneType = 'slide' | 'quiz' | 'interactive' | 'pbl';
 
 export type StageMode = 'autonomous' | 'playback';
 
+export type ClassroomWorkspaceMode = 'present' | 'edit';
+
 export type Whiteboard = Omit<Slide, 'theme' | 'turningMode' | 'sectionTag' | 'type'>;
 
 export interface SelectedKnowledgeBaseSummary {

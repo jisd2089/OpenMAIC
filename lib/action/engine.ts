@@ -29,8 +29,8 @@ import type {
   WbDeleteAction,
   WbDrawLineAction,
 } from '@/lib/types/action';
-import katex from 'katex';
 import { createLogger } from '@/lib/logger';
+import { renderKatexToHtml } from '@/lib/utils/katex';
 
 const log = createLogger('ActionEngine');
 
@@ -365,11 +365,7 @@ export class ActionEngine {
     if (!wb.success || !wb.data) return;
 
     try {
-      const html = katex.renderToString(action.latex, {
-        throwOnError: false,
-        displayMode: true,
-        output: 'html',
-      });
+      const html = renderKatexToHtml(action.latex);
 
       this.stageAPI.whiteboard.addElement(
         {

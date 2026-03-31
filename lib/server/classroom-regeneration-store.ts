@@ -11,6 +11,7 @@ import type {
 } from '@/lib/server/classroom/types';
 
 export interface ClassroomRegenerationJob extends ClassroomRegenerationJobSummary {
+  baseUrl?: string;
   scopeId?: string;
   knowledgeBaseIds: string[];
   memoryIds: string[];
@@ -48,6 +49,7 @@ async function withJobLock<T>(jobId: string, fn: () => Promise<T>): Promise<T> {
 export async function createClassroomRegenerationJob(params: {
   jobId: string;
   classroomId: string;
+  baseUrl?: string;
   targetType: ClassroomRegenerationJob['targetType'];
   targetId?: string;
   targetSceneIds: string[];
@@ -62,6 +64,7 @@ export async function createClassroomRegenerationJob(params: {
   const job: ClassroomRegenerationJob = {
     id: params.jobId,
     classroomId: params.classroomId,
+    baseUrl: params.baseUrl,
     status: 'pending',
     step: 'queued',
     message: 'Classroom regeneration job queued',

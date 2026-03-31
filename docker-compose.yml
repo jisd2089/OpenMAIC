@@ -1,6 +1,6 @@
 services:
   openmaic:
-    image: openmaic-openmaic:20260327
+    image: openmaic-openmaic:20260331
     build: .
     ports:
       - "3000:3000"

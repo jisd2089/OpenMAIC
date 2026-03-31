@@ -1,13 +1,13 @@
 'use client';
 
-import { Brain, ChevronDown, Copy, Database, Download, Film } from 'lucide-react';
+import { Brain, ChevronDown, Copy, Database, Download, Film, SlidersHorizontal } from 'lucide-react';
 import { Stage } from '@/components/stage';
 import { ClassroomOpsPanel } from '@/components/classroom/classroom-ops-panel';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { ThemeProvider } from '@/lib/hooks/use-theme';
 import { useStageStore } from '@/lib/store';
 import { loadImageMapping } from '@/lib/utils/image-storage';
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import { saveAs } from 'file-saver';
 import { toast } from 'sonner';
@@ -25,6 +25,7 @@ import { parseGenerationParamsStorage } from '@/lib/generation/session-storage';
 import type { AgentInfo } from '@/lib/generation/generation-pipeline';
 import type { PdfImage } from '@/lib/types/generation';
 import type { GenerationContextSummary } from '@/lib/types/stage';
+import type { ChatAreaExtraTab } from '@/components/chat/chat-area';
 import {
   hasGenerationContextSummary,
   mergeGenerationContextSummary,
@@ -153,11 +154,11 @@ export default function ClassroomDetailPage() {
       const generatedAgentIds = await loadGeneratedAgentsForStage(classroomId);
       const { useSettingsStore } = await import('@/lib/store/settings');
       if (generatedAgentIds.length > 0) {
-        // Auto mode â€?use generated agents from IndexedDB
+        // Auto mode: use generated agents from IndexedDB
         useSettingsStore.getState().setAgentMode('auto');
         useSettingsStore.getState().setSelectedAgentIds(generatedAgentIds);
       } else {
-        // Preset mode â€?restore agent IDs saved in the stage at creation time.
+        // Preset mode: restore agent IDs saved in the stage at creation time.
         // Filter out any stale generated IDs that may have been persisted before
         // the bleed-fix, so they don't resolve against a leftover registry entry.
         const stage = useStageStore.getState().stage;
@@ -192,10 +193,11 @@ export default function ClassroomDetailPage() {
     }
 
     const { stage, scenes } = json.classroom;
-    const currentSceneId = useStageStore.getState().currentSceneId;
+    const { currentSceneId, workspaceMode } = useStageStore.getState();
     useStageStore.getState().setStage(stage);
     useStageStore.setState({
       scenes,
+      workspaceMode,
       currentSceneId: scenes.some((scene: { id: string }) => scene.id === currentSceneId)
         ? currentSceneId
         : (scenes[0]?.id ?? null),
@@ -203,6 +205,20 @@ export default function ClassroomDetailPage() {
     setContextSummary(stage.generationContext ?? null);
     await useStageStore.getState().saveToStorage();
   }, [classroomId]);
+
+  const classroomOpsTabs = useMemo<ChatAreaExtraTab[]>(
+    () => [
+      {
+        value: 'classroom-ops',
+        label: t('classroomOps.title'),
+        icon: <SlidersHorizontal className="w-3.5 h-3.5" />,
+        content: (
+          <ClassroomOpsPanel classroomId={classroomId} onReload={reloadClassroomFromServer} />
+        ),
+      },
+    ],
+    [classroomId, reloadClassroomFromServer, t],
+  );
 
   useEffect(() => {
     // Reset loading state on course switch to unmount Stage during transition,
@@ -308,7 +324,6 @@ export default function ClassroomDetailPage() {
     <ThemeProvider>
       <MediaStageProvider value={classroomId}>
         <div className="relative h-screen flex flex-col overflow-hidden">
-          <ClassroomOpsPanel classroomId={classroomId} onReload={reloadClassroomFromServer} />
           {contextSummary &&
           hasGenerationContextSummary(contextSummary) ? (
             <div className="absolute top-4 right-4 z-40 max-w-sm">
@@ -555,7 +570,10 @@ export default function ClassroomDetailPage() {
               </div>
             </div>
           ) : (
-            <Stage onRetryOutline={retrySingleOutline} />
+            <Stage
+              onRetryOutline={retrySingleOutline}
+              rightPanelExtraTabs={classroomOpsTabs}
+            />
           )}
         </div>
       </MediaStageProvider>

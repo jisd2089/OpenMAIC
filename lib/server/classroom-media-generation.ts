@@ -9,17 +9,14 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { createLogger } from '@/lib/logger';
 import { CLASSROOMS_DIR } from '@/lib/server/classroom-storage';
-import { generateImage } from '@/lib/media/image-providers';
-import { generateVideo, normalizeVideoOptions } from '@/lib/media/video-providers';
-import { generateTTS } from '@/lib/audio/tts-providers';
 import { DEFAULT_TTS_VOICES, TTS_PROVIDERS } from '@/lib/audio/constants';
 import { IMAGE_PROVIDERS } from '@/lib/media/image-providers';
 import { VIDEO_PROVIDERS } from '@/lib/media/video-providers';
 import { isMediaPlaceholder } from '@/lib/store/media-generation';
 import {
-  getServerImageProviders,
-  getServerVideoProviders,
-  getServerTTSProviders,
+  getPreferredServerImageProviderId,
+  getPreferredServerVideoProviderId,
+  getPreferredServerTTSProviderId,
   resolveImageApiKey,
   resolveImageBaseUrl,
   resolveVideoApiKey,
@@ -33,7 +30,10 @@ import type { SpeechAction } from '@/lib/types/action';
 import type { ImageProviderId } from '@/lib/media/types';
 import type { VideoProviderId } from '@/lib/media/types';
 import type { TTSProviderId } from '@/lib/audio/types';
+import { generateImageWithLogging } from '@/lib/server/image-generation';
 import { splitLongSpeechActions } from '@/lib/audio/tts-utils';
+import { generateVideoWithLogging, normalizeServerVideoGenerationOptions } from '@/lib/server/video-generation';
+import { generateTTSWithLogging } from '@/lib/server/tts-generation';
 
 const log = createLogger('ClassroomMedia');
 
@@ -79,20 +79,23 @@ export async function generateMediaForClassroom(
   if (requests.length === 0) return {};
 
   // Resolve providers
-  const imageProviderIds = Object.keys(getServerImageProviders());
-  const videoProviderIds = Object.keys(getServerVideoProviders());
+  const imageProviderId = getPreferredServerImageProviderId();
+  const videoProviderId = getPreferredServerVideoProviderId();
 
   const mediaMap: Record<string, string> = {};
 
   // Separate image and video requests, generate each type sequentially
   // but run the two types in parallel (providers often have limited concurrency).
-  const imageRequests = requests.filter((r) => r.type === 'image' && imageProviderIds.length > 0);
-  const videoRequests = requests.filter((r) => r.type === 'video' && videoProviderIds.length > 0);
+  const imageRequests = requests.filter((r) => r.type === 'image' && !!imageProviderId);
+  const videoRequests = requests.filter((r) => r.type === 'video' && !!videoProviderId);
 
   const generateImages = async () => {
+    if (!imageProviderId) {
+      return;
+    }
     for (const req of imageRequests) {
       try {
-        const providerId = imageProviderIds[0] as ImageProviderId;
+        const providerId = imageProviderId as ImageProviderId;
         const apiKey = resolveImageApiKey(providerId);
         if (!apiKey) {
           log.warn(`No API key for image provider "${providerId}", skipping ${req.elementId}`);
@@ -101,9 +104,10 @@ export async function generateMediaForClassroom(
         const providerConfig = IMAGE_PROVIDERS[providerId];
         const model = providerConfig?.models?.[0]?.id;
 
-        const result = await generateImage(
+        const result = await generateImageWithLogging(
           { providerId, apiKey, baseUrl: resolveImageBaseUrl(providerId), model },
           { prompt: req.prompt, aspectRatio: req.aspectRatio || '16:9' },
+          log,
         );
 
         let buf: Buffer;
@@ -131,9 +135,12 @@ export async function generateMediaForClassroom(
   };
 
   const generateVideos = async () => {
+    if (!videoProviderId) {
+      return;
+    }
     for (const req of videoRequests) {
       try {
-        const providerId = videoProviderIds[0] as VideoProviderId;
+        const providerId = videoProviderId as VideoProviderId;
         const apiKey = resolveVideoApiKey(providerId);
         if (!apiKey) {
           log.warn(`No API key for video provider "${providerId}", skipping ${req.elementId}`);
@@ -142,14 +149,15 @@ export async function generateMediaForClassroom(
         const providerConfig = VIDEO_PROVIDERS[providerId];
         const model = providerConfig?.models?.[0]?.id;
 
-        const normalized = normalizeVideoOptions(providerId, {
+        const normalized = normalizeServerVideoGenerationOptions(providerId, {
           prompt: req.prompt,
           aspectRatio: (req.aspectRatio as '16:9' | '4:3' | '1:1' | '9:16') || '16:9',
         });
 
-        const result = await generateVideo(
+        const result = await generateVideoWithLogging(
           { providerId, apiKey, baseUrl: resolveVideoBaseUrl(providerId), model },
           normalized,
+          log,
         );
 
         const buf = await downloadToBuffer(result.url);
@@ -210,15 +218,12 @@ export async function generateTTSForClassroom(
   await ensureDir(audioDir);
 
   // Resolve TTS provider (exclude browser-native-tts)
-  const ttsProviderIds = Object.keys(getServerTTSProviders()).filter(
-    (id) => id !== 'browser-native-tts',
-  );
-  if (ttsProviderIds.length === 0) {
+  const providerId = getPreferredServerTTSProviderId();
+  if (!providerId) {
     log.warn('No server TTS provider configured, skipping TTS generation');
     return;
   }
 
-  const providerId = ttsProviderIds[0] as TTSProviderId;
   const apiKey = resolveTTSApiKey(providerId);
   if (!apiKey) {
     log.warn(`No API key for TTS provider "${providerId}", skipping TTS generation`);
@@ -226,8 +231,6 @@ export async function generateTTSForClassroom(
   }
   const ttsBaseUrl = resolveTTSBaseUrl(providerId) || TTS_PROVIDERS[providerId]?.defaultBaseUrl;
   const voice = DEFAULT_TTS_VOICES[providerId] || 'default';
-  const format = TTS_PROVIDERS[providerId]?.supportedFormats?.[0] || 'mp3';
-
   for (const scene of scenes) {
     if (!scene.actions) continue;
 
@@ -241,12 +244,14 @@ export async function generateTTSForClassroom(
       const audioId = `tts_${action.id}`;
 
       try {
-        const result = await generateTTS(
+        const result = await generateTTSWithLogging(
           { providerId, apiKey, baseUrl: ttsBaseUrl, voice, speed: speechAction.speed },
           speechAction.text,
+          log,
+          audioId,
         );
 
-        const filename = `${audioId}.${format}`;
+        const filename = `${audioId}.${result.format}`;
         await fs.writeFile(path.join(audioDir, filename), result.audio);
 
         speechAction.audioId = audioId;

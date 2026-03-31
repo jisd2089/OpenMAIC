@@ -1,6 +1,14 @@
 'use client';
 
-import { useImperativeHandle, forwardRef, useRef, useCallback, useState, useMemo } from 'react';
+import {
+  useImperativeHandle,
+  forwardRef,
+  useRef,
+  useCallback,
+  useState,
+  useMemo,
+  type ReactNode,
+} from 'react';
 import type { SessionType } from '@/lib/types/chat';
 import type { LectureNoteEntry } from '@/lib/types/chat';
 import type { DiscussionRequest } from '@/components/roundtable';
@@ -37,6 +45,15 @@ interface ChatAreaProps {
   /** When provided and returns true, StreamBuffer holds on the current text item after reveal. */
   shouldHoldAfterReveal?: () => { holding: boolean; segmentDone: number } | boolean;
   currentSceneId?: string | null;
+  extraTabs?: ChatAreaExtraTab[];
+}
+
+export interface ChatAreaExtraTab {
+  value: string;
+  label: string;
+  icon: ReactNode;
+  content: ReactNode;
+  indicator?: ReactNode;
 }
 
 export interface ChatAreaRef {
@@ -56,7 +73,7 @@ export interface ChatAreaRef {
   resumeBuffer: (sessionId: string) => void;
   pauseActiveLiveBuffer: () => boolean;
   resumeActiveLiveBuffer: () => void;
-  switchToTab: (tab: 'lecture' | 'chat') => void;
+  switchToTab: (tab: string) => void;
 }
 
 const DEFAULT_WIDTH = 340;
@@ -82,6 +99,7 @@ export const ChatArea = forwardRef<ChatAreaRef, ChatAreaProps>(
       onSegmentSealed,
       shouldHoldAfterReveal,
       currentSceneId,
+      extraTabs = [],
     },
     ref,
   ) => {
@@ -119,7 +137,7 @@ export const ChatArea = forwardRef<ChatAreaRef, ChatAreaProps>(
       shouldHoldAfterReveal,
     });
 
-    const [activeTab, setActiveTab] = useState<'lecture' | 'chat'>('lecture');
+    const [activeTab, setActiveTab] = useState('lecture');
     const isDraggingRef = useRef(false);
     const [isDragging, setIsDragging] = useState(false);
     const bottomRef = useRef<HTMLDivElement>(null);
@@ -180,7 +198,7 @@ export const ChatArea = forwardRef<ChatAreaRef, ChatAreaProps>(
       [endSession, onStopSession],
     );
 
-    const switchToTab = useCallback((tab: 'lecture' | 'chat') => {
+    const switchToTab = useCallback((tab: string) => {
       setActiveTab(tab);
     }, []);
 
@@ -283,6 +301,17 @@ export const ChatArea = forwardRef<ChatAreaRef, ChatAreaProps>(
                     </span>
                   )}
                 </TabsTrigger>
+                {extraTabs.map((tab) => (
+                  <TabsTrigger
+                    key={tab.value}
+                    value={tab.value}
+                    className="text-xs gap-1 flex-1 relative"
+                  >
+                    {tab.icon}
+                    {tab.label}
+                    {tab.indicator}
+                  </TabsTrigger>
+                ))}
               </TabsList>
 
               {onCollapseChange && (
@@ -330,6 +359,16 @@ export const ChatArea = forwardRef<ChatAreaRef, ChatAreaProps>(
                 )}
               </div>
             </TabsContent>
+
+            {extraTabs.map((tab) => (
+              <TabsContent
+                key={tab.value}
+                value={tab.value}
+                className="flex-1 overflow-hidden flex flex-col"
+              >
+                {tab.content}
+              </TabsContent>
+            ))}
           </Tabs>
         </div>
       </div>

@@ -17,7 +17,6 @@
  */
 
 import { NextRequest } from 'next/server';
-import { generateVideo, normalizeVideoOptions } from '@/lib/media/video-providers';
 import { resolveVideoApiKey, resolveVideoBaseUrl } from '@/lib/server/provider-config';
 import type { VideoProviderId, VideoGenerationOptions } from '@/lib/media/types';
 import { createLogger } from '@/lib/logger';
@@ -25,6 +24,7 @@ import { apiError, apiSuccess, API_ERROR_CODES } from '@/lib/server/api-response
 import { parseJsonRequestWithSchema } from '@/lib/server/http-validation';
 import { videoGenerationRequestSchema } from '@/lib/server/generation/contracts';
 import { validateUrlForSSRF } from '@/lib/server/ssrf-guard';
+import { generateVideoWithLogging, normalizeServerVideoGenerationOptions } from '@/lib/server/video-generation';
 
 const log = createLogger('VideoGeneration API');
 
@@ -64,17 +64,12 @@ export async function POST(request: NextRequest) {
     const baseUrl = clientBaseUrl ? clientBaseUrl : resolveVideoBaseUrl(providerId, clientBaseUrl);
 
     // Normalize options against provider capabilities
-    const options = normalizeVideoOptions(providerId, body);
+    const options = normalizeServerVideoGenerationOptions(providerId, body);
 
-    log.info(
-      `Generating video: provider=${providerId}, model=${clientModel || 'default'}, ` +
-        `prompt="${body.prompt.slice(0, 80)}...", duration=${options.duration ?? 'auto'}, ` +
-        `aspect=${options.aspectRatio ?? 'auto'}, resolution=${options.resolution ?? 'auto'}`,
-    );
-
-    const result = await generateVideo(
+    const result = await generateVideoWithLogging(
       { providerId, apiKey, baseUrl, model: clientModel },
       options,
+      log,
     );
 
     log.info(

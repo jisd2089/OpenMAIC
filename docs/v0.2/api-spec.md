@@ -455,6 +455,18 @@ interface ClassroomRegenerationJob {
 - `regenerateMode` 默认 `full`
 - `scopeId` 空值回退默认 scope
 
+前置条件：
+
+- `targetType=scene` 时，`targetId` 必须取自左侧页面导航当前选中页
+- 前端调用该接口前，必须保证 `/api/classroom/:id` 在服务端可读
+- 若课堂仅存在本地草稿，前端需先执行一次 `PATCH /api/classroom/:id` 保存草稿，再创建重制任务
+
+补充说明：
+
+- 如果未做前置保存而服务端课堂不存在，接口可能返回 `CLASSROOM_NOT_FOUND`
+- `v0.2` 前端应屏蔽这类直接暴露给用户的错误，改为“自动保存后重试”流程
+- 服务端创建任务后，应优先解析当前已配置可用的 LLM provider/model；若预览涉及图片、视频、讲稿音频，还需继续调用已配置可用的图片/视频/TTS provider 完成资源补齐
+
 ### 7.2 查询重制任务
 
 `GET /api/classroom/:id/regenerate/:jobId`
@@ -483,6 +495,11 @@ interface ClassroomRegenerationJob {
   }
 }
 ```
+
+状态说明：
+
+- `step` 至少支持：`queued`、`preparing`、`resolving-model`、`generating-scene`、`generating-media`、`generating-tts`、`assembling-preview`、`preview-ready`
+- 当前端等待时间较长时，应继续轮询该接口并以 `step` 驱动加载动画和阶段文案
 
 ### 7.3 应用重制结果
 
@@ -513,6 +530,7 @@ interface ClassroomRegenerationJob {
 
 - 应用前默认创建快照
 - 只允许 `preview-ready` 状态应用
+- 应用成功后，除应用前快照外，还需额外生成一份 `Applied regeneration job <jobId>` 系统版本，供后续恢复切换
 
 ### 7.4 丢弃重制结果
 
@@ -556,4 +574,6 @@ interface ClassroomRegenerationJob {
 - 编辑保存与草稿状态
 - 快照创建、查询、恢复
 - 重制任务创建、查询、应用、丢弃
+- 本地草稿未落盘时，前端先保存再发起重制
+- 左侧页面选中变化会同步影响 `targetId`
 - 不合法请求统一返回 `INVALID_REQUEST`

@@ -9,6 +9,10 @@ import fs from 'fs';
 import path from 'path';
 import yaml from 'js-yaml';
 import { createLogger } from '@/lib/logger';
+import { PROVIDERS } from '@/lib/ai/providers';
+import type { ProviderId } from '@/lib/types/provider';
+import type { TTSProviderId, ASRProviderId } from '@/lib/audio/types';
+import type { ImageProviderId, VideoProviderId } from '@/lib/media/types';
 
 const log = createLogger('ServerProviderConfig');
 
@@ -223,6 +227,19 @@ function getConfig(): ServerConfig {
   return config;
 }
 
+function getFirstConfiguredProviderId<T extends string>(
+  section: Record<string, ServerProviderEntry>,
+  options?: { exclude?: string[] },
+): T | undefined {
+  const exclude = new Set(options?.exclude || []);
+  for (const providerId of Object.keys(section)) {
+    if (!exclude.has(providerId)) {
+      return providerId as T;
+    }
+  }
+  return undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Public API — LLM
 // ---------------------------------------------------------------------------
@@ -256,6 +273,21 @@ export function resolveProxy(providerId: string): string | undefined {
   return getConfig().providers[providerId]?.proxy;
 }
 
+export function getPreferredServerLLMProviderId(): ProviderId | undefined {
+  return getFirstConfiguredProviderId<ProviderId>(getConfig().providers);
+}
+
+export function getPreferredServerModelString(): string | undefined {
+  const providerId = getPreferredServerLLMProviderId();
+  if (!providerId) {
+    return undefined;
+  }
+
+  const configured = getConfig().providers[providerId];
+  const modelId = configured?.models?.[0] || PROVIDERS[providerId]?.models?.[0]?.id;
+  return modelId ? `${providerId}:${modelId}` : undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Public API — TTS
 // ---------------------------------------------------------------------------
@@ -280,6 +312,12 @@ export function resolveTTSBaseUrl(providerId: string, clientBaseUrl?: string): s
   return getConfig().tts[providerId]?.baseUrl;
 }
 
+export function getPreferredServerTTSProviderId(): TTSProviderId | undefined {
+  return getFirstConfiguredProviderId<TTSProviderId>(getConfig().tts, {
+    exclude: ['browser-native-tts'],
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Public API — ASR
 // ---------------------------------------------------------------------------
@@ -302,6 +340,12 @@ export function resolveASRApiKey(providerId: string, clientKey?: string): string
 export function resolveASRBaseUrl(providerId: string, clientBaseUrl?: string): string | undefined {
   if (clientBaseUrl) return clientBaseUrl;
   return getConfig().asr[providerId]?.baseUrl;
+}
+
+export function getPreferredServerASRProviderId(): ASRProviderId | undefined {
+  return getFirstConfiguredProviderId<ASRProviderId>(getConfig().asr, {
+    exclude: ['browser-native'],
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -354,6 +398,10 @@ export function resolveImageBaseUrl(
   return getConfig().image[providerId]?.baseUrl;
 }
 
+export function getPreferredServerImageProviderId(): ImageProviderId | undefined {
+  return getFirstConfiguredProviderId<ImageProviderId>(getConfig().image);
+}
+
 // ---------------------------------------------------------------------------
 // Public API — Video Generation
 // ---------------------------------------------------------------------------
@@ -378,6 +426,10 @@ export function resolveVideoBaseUrl(
 ): string | undefined {
   if (clientBaseUrl) return clientBaseUrl;
   return getConfig().video[providerId]?.baseUrl;
+}
+
+export function getPreferredServerVideoProviderId(): VideoProviderId | undefined {
+  return getFirstConfiguredProviderId<VideoProviderId>(getConfig().video);
 }
 
 // ---------------------------------------------------------------------------

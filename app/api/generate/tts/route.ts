@@ -8,7 +8,6 @@
  */
 
 import { NextRequest } from 'next/server';
-import { generateTTS } from '@/lib/audio/tts-providers';
 import { resolveTTSApiKey, resolveTTSBaseUrl } from '@/lib/server/provider-config';
 import type { TTSProviderId } from '@/lib/audio/types';
 import { createLogger } from '@/lib/logger';
@@ -16,6 +15,7 @@ import { apiError, apiSuccess, API_ERROR_CODES } from '@/lib/server/api-response
 import { parseJsonRequestWithSchema } from '@/lib/server/http-validation';
 import { ttsGenerationRequestSchema } from '@/lib/server/generation/contracts';
 import { validateUrlForSSRF } from '@/lib/server/ssrf-guard';
+import { generateTTSWithLogging } from '@/lib/server/tts-generation';
 
 const log = createLogger('TTS API');
 
@@ -68,12 +68,7 @@ export async function POST(req: NextRequest) {
       baseUrl,
     };
 
-    log.info(
-      `Generating TTS: provider=${ttsProviderId}, voice=${ttsVoice}, audioId=${audioId}, textLen=${text.length}`,
-    );
-
-    // Generate audio
-    const { audio, format } = await generateTTS(config, text);
+    const { audio, format } = await generateTTSWithLogging(config, text, log, audioId);
 
     // Convert to base64
     const base64 = Buffer.from(audio).toString('base64');

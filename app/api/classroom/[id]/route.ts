@@ -5,7 +5,10 @@ import { classroomRouteParamsSchema, patchClassroomSchema } from '@/lib/server/c
 import { buildRequestOrigin, isValidClassroomId, readClassroom } from '@/lib/server/classroom-storage';
 import { patchClassroom } from '@/lib/server/classroom-patch';
 import { handleRouteError } from '@/lib/server/route-error';
+import { createLogger } from '@/lib/logger';
 import type { PatchClassroomResponseData } from '@/lib/server/classroom/types';
+
+const log = createLogger('Classroom Route');
 
 export async function GET(_req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
@@ -25,6 +28,7 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
 
     return apiSuccess({ classroom });
   } catch (error) {
+    log.error('Failed to retrieve classroom by id', error);
     return handleRouteError(error, 'Failed to retrieve classroom');
   }
 }
@@ -49,6 +53,7 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
 
     return apiSuccess<PatchClassroomResponseData>(result.result);
   } catch (error) {
+    log.error('Failed to save classroom changes', error);
     return handleRouteError(error, 'Failed to save classroom changes');
   }
 }

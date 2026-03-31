@@ -6,8 +6,13 @@
  */
 
 import type { NextRequest } from 'next/server';
-import { getModel, parseModelString, type ModelWithInfo } from '@/lib/ai/providers';
-import { resolveApiKey, resolveBaseUrl, resolveProxy } from '@/lib/server/provider-config';
+import { getModel, parseModelString, PROVIDERS, type ModelWithInfo } from '@/lib/ai/providers';
+import {
+  getPreferredServerModelString,
+  resolveApiKey,
+  resolveBaseUrl,
+  resolveProxy,
+} from '@/lib/server/provider-config';
 import { validateUrlForSSRF } from '@/lib/server/ssrf-guard';
 
 export interface ResolvedModel extends ModelWithInfo {
@@ -29,7 +34,7 @@ export function resolveModel(params: {
   providerType?: string;
   requiresApiKey?: boolean;
 }): ResolvedModel {
-  const modelString = params.modelString || process.env.DEFAULT_MODEL || 'gpt-4o-mini';
+  const modelString = params.modelString || resolveDefaultModelString();
   const { providerId, modelId } = parseModelString(modelString);
 
   const clientBaseUrl = params.baseUrl || undefined;
@@ -56,6 +61,20 @@ export function resolveModel(params: {
   });
 
   return { model, modelInfo, modelString, apiKey };
+}
+
+function resolveDefaultModelString(): string {
+  const envDefault = process.env.DEFAULT_MODEL?.trim();
+  if (envDefault) {
+    return envDefault;
+  }
+
+  const preferredModel = getPreferredServerModelString();
+  if (preferredModel) {
+    return preferredModel;
+  }
+
+  return `openai:${PROVIDERS.openai.models[0]?.id || 'gpt-4o-mini'}`;
 }
 
 /**

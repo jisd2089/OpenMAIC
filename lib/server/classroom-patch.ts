@@ -3,7 +3,10 @@ import type { PatchClassroomInput } from '@/lib/server/classroom/contracts';
 import type { ClassroomPatchSaveResult } from '@/lib/server/classroom/types';
 import { API_ERROR_CODES } from '@/lib/server/api-response';
 import { readClassroom, persistClassroom } from '@/lib/server/classroom-storage';
+import { createLogger } from '@/lib/logger';
 import { ServiceError } from '@/lib/server/service-error';
+
+const log = createLogger('ClassroomPatch');
 
 function mergeScenes(
   classroomId: string,
@@ -82,22 +85,29 @@ export async function patchClassroom(params: {
   baseUrl: string;
 }): Promise<{ classroom: { stage: Stage; scenes: Scene[] }; result: ClassroomPatchSaveResult }> {
   const existing = await readClassroom(params.classroomId);
-  if (!existing) {
-    throw new ServiceError(API_ERROR_CODES.CLASSROOM_NOT_FOUND, 404, 'Classroom not found');
-  }
-
   const now = Date.now();
   const editedAt = new Date().toISOString();
-  const stage: Stage = {
-    ...existing.stage,
-    ...(params.input.stage as Partial<Stage> | undefined),
-    id: params.classroomId,
-    updatedAt: now,
-    editable: true,
-    isDraft: params.input.saveMode !== 'publish',
-    lastManualEditedAt: editedAt,
-  };
-  const scenes = mergeScenes(params.classroomId, existing.scenes, params.input.scenes || []);
+  const stagePatch = params.input.stage as Partial<Stage> | undefined;
+  const stage: Stage = existing
+    ? {
+        ...existing.stage,
+        ...stagePatch,
+        id: params.classroomId,
+        updatedAt: now,
+        editable: true,
+        isDraft: params.input.saveMode !== 'publish',
+        lastManualEditedAt: editedAt,
+      }
+    : createDraftStage(params.classroomId, stagePatch, now, editedAt, params.input.saveMode);
+  const scenes = mergeScenes(params.classroomId, existing?.scenes || [], params.input.scenes || []);
+
+  if (!existing) {
+    log.info('Creating draft classroom from PATCH payload', {
+      classroomId: params.classroomId,
+      saveMode: params.input.saveMode,
+      sceneCount: scenes.length,
+    });
+  }
 
   await persistClassroom(
     {
@@ -106,7 +116,7 @@ export async function patchClassroom(params: {
       scenes,
     },
     params.baseUrl,
-    { createdAt: existing.createdAt },
+    { createdAt: existing?.createdAt ?? editedAt },
   );
 
   return {
@@ -116,5 +126,39 @@ export async function patchClassroom(params: {
       savedAt: editedAt,
       saveMode: params.input.saveMode,
     },
+  };
+}
+
+function createDraftStage(
+  classroomId: string,
+  stagePatch: Partial<Stage> | undefined,
+  now: number,
+  editedAt: string,
+  saveMode: 'draft' | 'publish',
+): Stage {
+  const name = stagePatch?.name?.trim();
+  if (!name) {
+    throw new ServiceError(
+      API_ERROR_CODES.INVALID_REQUEST,
+      400,
+      'Stage name is required to create a classroom draft',
+    );
+  }
+
+  return {
+    id: classroomId,
+    name,
+    description: stagePatch?.description,
+    createdAt: now,
+    updatedAt: now,
+    language: stagePatch?.language,
+    style: stagePatch?.style,
+    generationContext: stagePatch?.generationContext,
+    agentIds: stagePatch?.agentIds,
+    editable: true,
+    isDraft: saveMode !== 'publish',
+    revisionId: stagePatch?.revisionId,
+    lastManualEditedAt: editedAt,
+    lastRegeneratedAt: stagePatch?.lastRegeneratedAt,
   };
 }

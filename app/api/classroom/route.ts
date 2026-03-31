@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { apiSuccess, apiError, API_ERROR_CODES } from '@/lib/server/api-response';
 import { parseJsonRequestWithSchema } from '@/lib/server/http-validation';
+import { createLogger } from '@/lib/logger';
 import type { Scene, Stage } from '@/lib/types/stage';
 import {
   buildRequestOrigin,
@@ -10,6 +11,8 @@ import {
   persistClassroom,
   readClassroom,
 } from '@/lib/server/classroom-storage';
+
+const log = createLogger('Classroom API');
 
 const classroomPersistSchema = z.object({
   stage: z
@@ -42,6 +45,7 @@ export async function POST(request: NextRequest) {
 
     return apiSuccess({ id: persisted.id, url: persisted.url }, 201);
   } catch (error) {
+    log.error('Failed to store classroom via POST', error);
     return apiError(
       API_ERROR_CODES.INTERNAL_ERROR,
       500,
@@ -74,6 +78,7 @@ export async function GET(request: NextRequest) {
 
     return apiSuccess({ classroom });
   } catch (error) {
+    log.error('Failed to retrieve classroom via GET', error);
     return apiError(
       API_ERROR_CODES.INTERNAL_ERROR,
       500,

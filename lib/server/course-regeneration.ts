@@ -3,6 +3,7 @@ import { createStageAPI } from '@/lib/api/stage-api';
 import type { StageStore } from '@/lib/api/stage-api-types';
 import { createLogger } from '@/lib/logger';
 import { parseModelString } from '@/lib/ai/providers';
+import type { MediaGenerationRequest } from '@/lib/media/types';
 import { resolveApiKey } from '@/lib/server/provider-config';
 import { resolveModel } from '@/lib/server/resolve-model';
 import {
@@ -23,6 +24,11 @@ import { API_ERROR_CODES } from '@/lib/server/api-response';
 import { ServiceError } from '@/lib/server/service-error';
 import { readClassroom, persistClassroom } from '@/lib/server/classroom-storage';
 import { createClassroomRevision } from '@/lib/server/classroom-revision-store';
+import {
+  generateMediaForClassroom,
+  generateTTSForClassroom,
+  replaceMediaPlaceholders,
+} from '@/lib/server/classroom-media-generation';
 import {
   readClassroomRegenerationJob,
   updateClassroomRegenerationJob,
@@ -124,6 +130,7 @@ function resolveTargetSceneIds(classroom: { scenes: Scene[] }, job: ClassroomReg
 function createServerAiCall(): AICallFn {
   const { model: languageModel, modelInfo, modelString } = resolveModel({});
   const { providerId } = parseModelString(modelString);
+  log.info(`Using server-configured regeneration model: ${modelString}`);
   const apiKey = resolveApiKey(providerId);
   if (!apiKey) {
     throw new Error(
@@ -145,6 +152,83 @@ function createServerAiCall(): AICallFn {
     );
     return result.text;
   };
+}
+
+function pickAspectRatio(width: number, height: number): '16:9' | '4:3' | '1:1' | '9:16' {
+  if (!width || !height) {
+    return '16:9';
+  }
+  const ratio = width / height;
+  if (ratio < 0.9) return '9:16';
+  if (ratio < 1.2) return '1:1';
+  if (ratio < 1.55) return '4:3';
+  return '16:9';
+}
+
+function buildRegenerationMediaRequests(scene: Scene, prompt: string): MediaGenerationRequest[] {
+  if (scene.type !== 'slide' || scene.content.type !== 'slide') {
+    return [];
+  }
+
+  const mediaElements = scene.content.canvas.elements.filter(
+    (element) => element.type === 'image' || element.type === 'video',
+  );
+  let imageIndex = 0;
+  let videoIndex = 0;
+
+  return mediaElements.map((element) => {
+    const isVideo = element.type === 'video';
+    if (isVideo) {
+      videoIndex += 1;
+    } else {
+      imageIndex += 1;
+    }
+
+    return {
+      type: isVideo ? 'video' : 'image',
+      elementId: isVideo
+        ? `gen_vid_${scene.id}_${videoIndex}`
+        : `gen_img_${scene.id}_${imageIndex}`,
+      prompt: isVideo
+        ? `Create a short instructional video for the slide "${scene.title}" that matches this rework request: ${prompt}`
+        : `Create a polished teaching visual for the slide "${scene.title}" that matches this rework request: ${prompt}`,
+      aspectRatio: pickAspectRatio(element.width, element.height),
+    } satisfies MediaGenerationRequest;
+  });
+}
+
+function buildRegenerationMediaOutlines(params: {
+  originalScenes: Scene[];
+  previewScenes: Scene[];
+  prompt: string;
+  language?: Stage['language'];
+}): SceneOutline[] {
+  const originalById = new Map(params.originalScenes.map((scene) => [scene.id, scene]));
+
+  return params.previewScenes.reduce<SceneOutline[]>((outlines, previewScene) => {
+      const originalScene = originalById.get(previewScene.id);
+      if (!originalScene) {
+        return outlines;
+      }
+
+      const mediaGenerations = buildRegenerationMediaRequests(originalScene, params.prompt);
+      if (mediaGenerations.length === 0) {
+        return outlines;
+      }
+
+      outlines.push({
+        id: previewScene.id,
+        type: previewScene.type,
+        title: previewScene.title,
+        description: `Regenerated media for ${previewScene.title}`,
+        keyPoints: [params.prompt],
+        order: previewScene.order,
+        language: params.language === 'en-US' ? 'en-US' : 'zh-CN',
+        mediaGenerations,
+      } satisfies SceneOutline);
+
+      return outlines;
+    }, []);
 }
 
 async function regenerateScenePreview(params: {
@@ -232,8 +316,8 @@ async function regenerateScenePreview(params: {
 export async function runClassroomRegeneration(jobId: string): Promise<void> {
   await updateClassroomRegenerationJob(jobId, {
     status: 'running',
-    step: 'regenerating',
-    message: 'Generating regeneration preview',
+    step: 'preparing',
+    message: 'Preparing regeneration job',
   });
 
   const job = await readClassroomRegenerationJob(jobId);
@@ -260,21 +344,82 @@ export async function runClassroomRegeneration(jobId: string): Promise<void> {
     );
   }
 
+  await updateClassroomRegenerationJob(jobId, {
+    status: 'running',
+    step: 'resolving-model',
+    message: 'Resolving the model for regeneration',
+  });
+
   const aiCall = createServerAiCall();
-  const previewScenes = await Promise.all(
-    targetScenes.map((scene) =>
-      regenerateScenePreview({
-        stage: classroom.stage,
-        scene,
-        prompt: job.prompt,
-        regenerateMode: job.regenerateMode,
-        scopeId: job.scopeId,
-        knowledgeBaseIds: job.knowledgeBaseIds,
-        memoryIds: job.memoryIds,
-        aiCall,
-      }),
-    ),
-  );
+  const previewScenes: Scene[] = [];
+
+  for (const [index, scene] of targetScenes.entries()) {
+    const current = index + 1;
+    await updateClassroomRegenerationJob(jobId, {
+      status: 'running',
+      step: 'generating-scene',
+      message: `Generating regenerated content ${current}/${targetScenes.length}: ${scene.title}`,
+    });
+    log.info(
+      `Regenerating scene ${current}/${targetScenes.length} for classroom ${job.classroomId}: ${scene.id} (${scene.title})`,
+    );
+
+    const previewScene = await regenerateScenePreview({
+      stage: classroom.stage,
+      scene,
+      prompt: job.prompt,
+      regenerateMode: job.regenerateMode,
+      scopeId: job.scopeId,
+      knowledgeBaseIds: job.knowledgeBaseIds,
+      memoryIds: job.memoryIds,
+      aiCall,
+    });
+
+    previewScenes.push(previewScene);
+    await updateClassroomRegenerationJob(jobId, {
+      status: 'running',
+      step: 'assembling-preview',
+      message: `Prepared regenerated preview ${current}/${targetScenes.length}`,
+    });
+  }
+
+  const mediaOutlines = buildRegenerationMediaOutlines({
+    originalScenes: targetScenes,
+    previewScenes,
+    prompt: job.prompt,
+    language: classroom.stage.language,
+  });
+  if (mediaOutlines.length > 0) {
+    await updateClassroomRegenerationJob(jobId, {
+      status: 'running',
+      step: 'generating-media',
+      message: `Generating media assets for ${mediaOutlines.length} regenerated scene(s)`,
+    });
+    try {
+      const mediaMap = await generateMediaForClassroom(
+        mediaOutlines,
+        job.classroomId,
+        job.baseUrl || '',
+      );
+      replaceMediaPlaceholders(previewScenes, mediaMap);
+      log.info(
+        `Generated ${Object.keys(mediaMap).length} media asset(s) for regeneration job ${jobId}`,
+      );
+    } catch (error) {
+      log.warn(`Media generation failed for regeneration job ${jobId}:`, error);
+    }
+  }
+
+  await updateClassroomRegenerationJob(jobId, {
+    status: 'running',
+    step: 'generating-tts',
+    message: 'Generating speech audio for regenerated scenes',
+  });
+  try {
+    await generateTTSForClassroom(previewScenes, job.classroomId, job.baseUrl || '');
+  } catch (error) {
+    log.warn(`TTS generation failed for regeneration job ${jobId}:`, error);
+  }
 
   await updateClassroomRegenerationJob(jobId, {
     status: 'preview-ready',
@@ -329,12 +474,23 @@ export async function applyClassroomRegeneration(params: {
 
   const previewById = new Map(job.preview.scenes.map((scene) => [scene.id, scene]));
   const scenes = classroom.scenes.map((scene) => previewById.get(scene.id) || scene);
-  const stage: Stage = {
+  const nextStage: Stage = {
     ...classroom.stage,
     ...(job.preview.stage || {}),
     id: params.classroomId,
     updatedAt: Date.now(),
     lastRegeneratedAt: new Date().toISOString(),
+  };
+  const appliedRevision = await createClassroomRevision({
+    classroomId: params.classroomId,
+    source: 'system',
+    summary: `Applied regeneration job ${params.jobId}`,
+    stage: nextStage,
+    scenes,
+  });
+  const stage: Stage = {
+    ...nextStage,
+    revisionId: appliedRevision.id,
   };
 
   await persistClassroom(

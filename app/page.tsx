@@ -657,7 +657,7 @@ function HomePage() {
                     'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400',
                 )}
               >
-                ¼òÌåÖÐÎÄ
+                ç®€ä½“ä¸­æ–‡
               </button>
               <button
                 onClick={() => {
@@ -930,10 +930,10 @@ function HomePage() {
                     <div className="mt-1 text-xs text-muted-foreground">
                       {courseImportStatus.fileName || t('home.importPackageDefault')}
                       {courseImportStatus.jobId
-                        ? ` ¡¤ ${t('home.importJobLabel')} ${courseImportStatus.jobId}`
+                        ? ` - ${t('home.importJobLabel')} ${courseImportStatus.jobId}`
                         : ''}
                       {courseImportStatus.classroomId
-                        ? ` ¡¤ ${t('home.importClassroomLabel')} ${courseImportStatus.classroomId}`
+                        ? ` - ${t('home.importClassroomLabel')} ${courseImportStatus.classroomId}`
                         : ''}
                     </div>
                     {courseImportStatus.message ? (
@@ -1716,7 +1716,7 @@ function ClassroomCard({
       {/* Info - outside the thumbnail */}
         <div className="mt-2.5 px-1 flex items-center gap-2">
           <span className="shrink-0 inline-flex items-center rounded-full bg-violet-100 dark:bg-violet-900/30 px-2 py-0.5 text-[11px] font-medium text-violet-600 dark:text-violet-400">
-            {classroom.sceneCount} {t('classroom.slides')} ¡¤ {formatDate(classroom.updatedAt)}
+            {classroom.sceneCount} {t('classroom.slides')} - {formatDate(classroom.updatedAt)}
           </span>
           {classroom.knowledgeBaseCount ? (
             <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">

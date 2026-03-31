@@ -3,7 +3,7 @@ import { nanoid } from 'nanoid';
 import { apiError, apiSuccess, API_ERROR_CODES } from '@/lib/server/api-response';
 import { parseJsonRequestWithSchema, parseWithSchema } from '@/lib/server/http-validation';
 import { classroomRouteParamsSchema, createClassroomRegenerationJobSchema } from '@/lib/server/classroom/contracts';
-import { readClassroom } from '@/lib/server/classroom-storage';
+import { buildRequestOrigin, readClassroom } from '@/lib/server/classroom-storage';
 import { createClassroomRegenerationJob } from '@/lib/server/classroom-regeneration-store';
 import { runClassroomRegenerationJob } from '@/lib/server/classroom-regeneration-runner';
 import { handleRouteError } from '@/lib/server/route-error';
@@ -53,6 +53,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     const job = await createClassroomRegenerationJob({
       jobId,
       classroomId: params.data.id,
+      baseUrl: buildRequestOrigin(req),
       targetType: parsed.data.targetType,
       targetId: parsed.data.targetId,
       targetSceneIds,

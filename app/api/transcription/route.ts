@@ -1,6 +1,10 @@
 import { NextRequest } from 'next/server';
 import { transcribeAudio } from '@/lib/audio/asr-providers';
-import { resolveASRApiKey, resolveASRBaseUrl } from '@/lib/server/provider-config';
+import {
+  getPreferredServerASRProviderId,
+  resolveASRApiKey,
+  resolveASRBaseUrl,
+} from '@/lib/server/provider-config';
 import type { ASRProviderId } from '@/lib/audio/types';
 import { createLogger } from '@/lib/logger';
 import { apiError, apiSuccess } from '@/lib/server/api-response';
@@ -22,8 +26,10 @@ export async function POST(req: NextRequest) {
       return apiError('MISSING_REQUIRED_FIELD', 400, 'Audio file is required');
     }
 
-    // providerId is required from the client — no server-side store to fall back to
-    const effectiveProviderId = providerId || ('openai-whisper' as ASRProviderId);
+    const effectiveProviderId = providerId || getPreferredServerASRProviderId();
+    if (!effectiveProviderId) {
+      return apiError('INVALID_REQUEST', 400, 'No configured ASR provider is available');
+    }
 
     const clientBaseUrl = baseUrl || undefined;
     if (clientBaseUrl && process.env.NODE_ENV === 'production') {

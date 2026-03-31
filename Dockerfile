@@ -27,7 +27,7 @@ COPY . .
 RUN pnpm build
 
 # ---- Stage 4: Runner ----
-FROM node:22-alpine AS runner
+FROM deps AS runner
 
 WORKDIR /app
 
@@ -35,16 +35,11 @@ ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
 
-RUN apk add --no-cache libc6-compat cairo pango jpeg giflib librsvg
-
-RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 nextjs
+RUN mkdir -p /app/data
 
 COPY --from=builder /app/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-
-USER nextjs
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
 
 EXPOSE 3000
 

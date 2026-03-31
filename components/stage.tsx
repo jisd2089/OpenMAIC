@@ -20,6 +20,8 @@ import type { Action, DiscussionAction, SpeechAction } from '@/lib/types/action'
 import { cn } from '@/lib/utils';
 // Playback state persistence removed — refresh always starts from the beginning
 import { ChatArea, type ChatAreaRef } from '@/components/chat/chat-area';
+import type { ChatAreaExtraTab } from '@/components/chat/chat-area';
+import { ClassroomEditorWorkspace } from '@/components/classroom/classroom-editor-workspace';
 import { agentsToParticipants, useAgentRegistry } from '@/lib/orchestration/registry/store';
 import type { AgentConfig } from '@/lib/orchestration/registry/types';
 import {
@@ -42,8 +44,10 @@ import { VisuallyHidden } from 'radix-ui';
  */
 export function Stage({
   onRetryOutline,
+  rightPanelExtraTabs,
 }: {
   onRetryOutline?: (outlineId: string) => Promise<void>;
+  rightPanelExtraTabs?: ChatAreaExtraTab[];
 }) {
   const { t } = useI18n();
   const { mode, getCurrentScene, scenes, currentSceneId, setCurrentSceneId, generatingOutlines } =
@@ -51,6 +55,7 @@ export function Stage({
   const failedOutlines = useStageStore.use.failedOutlines();
   const regenerationPreviewScenes = useStageStore.use.regenerationPreviewScenes();
   const showRegenerationPreview = useStageStore.use.showRegenerationPreview();
+  const workspaceMode = useStageStore.use.workspaceMode();
 
   const currentScene = getCurrentScene();
   const previewScene = useMemo(() => {
@@ -58,6 +63,8 @@ export function Stage({
     return regenerationPreviewScenes.find((scene) => scene.id === currentSceneId) || null;
   }, [currentSceneId, regenerationPreviewScenes, showRegenerationPreview]);
   const displayScene = previewScene || currentScene;
+  const headerScene = workspaceMode === 'edit' ? currentScene : displayScene;
+  const playbackSceneVersion = workspaceMode === 'present' ? (currentScene?.updatedAt ?? 0) : 0;
 
   // Layout state from settings store (persisted via localStorage)
   const sidebarCollapsed = useSettingsStore((s) => s.sidebarCollapsed);
@@ -377,6 +384,21 @@ export function Stage({
     // Reset all roundtable/live state so scenes are fully isolated
     resetSceneState();
 
+    if (workspaceMode === 'edit') {
+      if (engineRef.current) {
+        engineRef.current.stop();
+        engineRef.current = null;
+      }
+      setEngineMode('idle');
+      setDiscussionTrigger(null);
+      setLectureSpeech(null);
+      setWhiteboardOpen(false);
+      if (document.fullscreenElement === stageRef.current) {
+        void document.exitFullscreen().catch(() => {});
+      }
+      return;
+    }
+
     if (!currentScene || !currentScene.actions || currentScene.actions.length === 0) {
       engineRef.current = null;
       setEngineMode('idle');
@@ -554,7 +576,7 @@ export function Stage({
       // Load saved playback state and restore position (but never auto-play).
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Only re-run when scene changes, functions are stable refs
-  }, [currentScene]);
+  }, [currentScene?.id, playbackSceneVersion, discussionTTS, resetSceneState, pickStudentAgent, setWhiteboardOpen, workspaceMode]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -923,7 +945,8 @@ export function Stage({
   // Calculate scene viewer height (subtract Header's 80px height)
   const sceneViewerHeight = (() => {
     const headerHeight = isPresenting ? 0 : 80; // Header h-20 = 80px
-    const roundtableHeight = mode === 'playback' && !isPresenting ? 192 : 0;
+    const roundtableHeight =
+      mode === 'playback' && workspaceMode === 'present' && !isPresenting ? 192 : 0;
     return `calc(100% - ${headerHeight + roundtableHeight}px)`;
   })();
 
@@ -948,8 +971,8 @@ export function Stage({
         {/* Header */}
         {!isPresenting && (
           <Header
-            currentSceneTitle={displayScene?.title || ''}
-            showPreviewBadge={Boolean(previewScene)}
+            currentSceneTitle={headerScene?.title || ''}
+            showPreviewBadge={workspaceMode === 'present' && Boolean(previewScene)}
           />
         )}
 
@@ -961,47 +984,51 @@ export function Stage({
           }}
           suppressHydrationWarning
         >
-          <CanvasArea
-            currentScene={displayScene}
-            currentSceneIndex={currentSceneIndex}
-            scenesCount={totalScenesCount}
-            mode={mode}
-            engineState={canvasEngineState}
-            isLiveSession={
-              chatIsStreaming || isTopicPending || engineMode === 'live' || !!chatSessionType
-            }
-            whiteboardOpen={whiteboardOpen}
-            sidebarCollapsed={sidebarCollapsed}
-            chatCollapsed={chatAreaCollapsed}
-            onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
-            onToggleChat={() => setChatAreaCollapsed(!chatAreaCollapsed)}
-            onPrevSlide={handlePreviousScene}
-            onNextSlide={handleNextScene}
-            onPlayPause={handlePlayPause}
-            onWhiteboardClose={handleWhiteboardToggle}
-            isPresenting={isPresenting}
-            onTogglePresentation={togglePresentation}
-            showStopDiscussion={
-              engineMode === 'live' ||
-              (chatIsStreaming && (chatSessionType === 'qa' || chatSessionType === 'discussion'))
-            }
-            onStopDiscussion={handleStopDiscussion}
-            hideToolbar={mode === 'playback' || (isPresenting && !controlsVisible)}
-            isPendingScene={isPendingScene}
-            isGenerationFailed={
-              isPendingScene && failedOutlines.some((f) => f.id === generatingOutlines[0]?.id)
-            }
-            showPreviewBadge={Boolean(previewScene)}
-            onRetryGeneration={
-              onRetryOutline && generatingOutlines[0]
-                ? () => onRetryOutline(generatingOutlines[0].id)
-                : undefined
-            }
-          />
+          {workspaceMode === 'edit' ? (
+            <ClassroomEditorWorkspace />
+          ) : (
+            <CanvasArea
+              currentScene={displayScene}
+              currentSceneIndex={currentSceneIndex}
+              scenesCount={totalScenesCount}
+              mode={mode}
+              engineState={canvasEngineState}
+              isLiveSession={
+                chatIsStreaming || isTopicPending || engineMode === 'live' || !!chatSessionType
+              }
+              whiteboardOpen={whiteboardOpen}
+              sidebarCollapsed={sidebarCollapsed}
+              chatCollapsed={chatAreaCollapsed}
+              onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
+              onToggleChat={() => setChatAreaCollapsed(!chatAreaCollapsed)}
+              onPrevSlide={handlePreviousScene}
+              onNextSlide={handleNextScene}
+              onPlayPause={handlePlayPause}
+              onWhiteboardClose={handleWhiteboardToggle}
+              isPresenting={isPresenting}
+              onTogglePresentation={togglePresentation}
+              showStopDiscussion={
+                engineMode === 'live' ||
+                (chatIsStreaming && (chatSessionType === 'qa' || chatSessionType === 'discussion'))
+              }
+              onStopDiscussion={handleStopDiscussion}
+              hideToolbar={mode === 'playback' || (isPresenting && !controlsVisible)}
+              isPendingScene={isPendingScene}
+              isGenerationFailed={
+                isPendingScene && failedOutlines.some((f) => f.id === generatingOutlines[0]?.id)
+              }
+              showPreviewBadge={Boolean(previewScene)}
+              onRetryGeneration={
+                onRetryOutline && generatingOutlines[0]
+                  ? () => onRetryOutline(generatingOutlines[0].id)
+                  : undefined
+              }
+            />
+          )}
         </div>
 
         {/* Roundtable Area */}
-        {mode === 'playback' && (
+        {mode === 'playback' && workspaceMode === 'present' && (
           <div
             className={cn(
               'transition-opacity duration-300',
@@ -1195,6 +1222,7 @@ export function Stage({
         onStopSession={doSessionCleanup}
         onSegmentSealed={discussionTTS.handleSegmentSealed}
         shouldHoldAfterReveal={discussionTTS.shouldHold}
+        extraTabs={rightPanelExtraTabs}
       />
 
       {/* Scene switch confirmation dialog */}

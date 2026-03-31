@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Stage, Scene, StageMode } from '@/lib/types/stage';
+import type { Stage, Scene, StageMode, ClassroomWorkspaceMode } from '@/lib/types/stage';
 import { createSelectors } from '@/lib/utils/create-selectors';
 import type { ChatSession } from '@/lib/types/chat';
 import type { SceneOutline } from '@/lib/types/generation';
@@ -52,6 +52,7 @@ interface StageState {
 
   // UI state
   toolbarState: ToolbarState;
+  workspaceMode: ClassroomWorkspaceMode;
 
   // Transient generation state (not persisted)
   generatingOutlines: SceneOutline[];
@@ -80,6 +81,7 @@ interface StageState {
   setChats: (chats: ChatSession[]) => void;
   setMode: (mode: StageMode) => void;
   setToolbarState: (state: ToolbarState) => void;
+  setWorkspaceMode: (mode: ClassroomWorkspaceMode) => void;
   setGeneratingOutlines: (outlines: SceneOutline[]) => void;
   setOutlines: (outlines: SceneOutline[]) => void;
   setRegenerationPreviewSceneIds: (sceneIds: string[]) => void;
@@ -111,6 +113,7 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
   chats: [],
   mode: 'playback',
   toolbarState: 'ai',
+  workspaceMode: 'present',
   generatingOutlines: [],
   outlines: [],
   regenerationPreviewSceneIds: [],
@@ -128,6 +131,7 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
       scenes: [],
       currentSceneId: null,
       chats: [],
+      workspaceMode: 'present',
       regenerationPreviewSceneIds: [],
       regenerationPreviewScenes: [],
       showRegenerationPreview: false,
@@ -168,10 +172,39 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
   },
 
   updateScene: (sceneId, updates) => {
-    const scenes = get().scenes.map((scene) =>
-      scene.id === sceneId ? { ...scene, ...updates } : scene,
+    const updatedAt = Date.now();
+    const currentState = get();
+    const isEditWorkspace = currentState.workspaceMode === 'edit';
+    const scenes = currentState.scenes.map((scene) =>
+      scene.id === sceneId
+        ? {
+            ...scene,
+            ...updates,
+            updatedAt,
+            ...(isEditWorkspace
+              ? {
+                  draftSource: 'manual' as const,
+                  lastManualEditedAt: new Date(updatedAt).toISOString(),
+                }
+              : {}),
+          }
+        : scene,
     );
-    set({ scenes });
+    set({
+      scenes,
+      stage: currentState.stage
+        ? {
+            ...currentState.stage,
+            updatedAt,
+            ...(isEditWorkspace
+              ? {
+                  isDraft: true,
+                  lastManualEditedAt: new Date(updatedAt).toISOString(),
+                }
+              : {}),
+          }
+        : currentState.stage,
+    });
     debouncedSave();
   },
 
@@ -206,6 +239,8 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
   setMode: (mode) => set({ mode }),
 
   setToolbarState: (toolbarState) => set({ toolbarState }),
+
+  setWorkspaceMode: (workspaceMode) => set({ workspaceMode }),
 
   setGeneratingOutlines: (generatingOutlines) => set({ generatingOutlines }),
 
@@ -311,6 +346,7 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
           scenes: data.scenes,
           currentSceneId: data.currentSceneId,
           chats: data.chats,
+          workspaceMode: 'present',
           outlines,
           regenerationPreviewSceneIds: [],
           regenerationPreviewScenes: [],
@@ -334,6 +370,7 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
       scenes: [],
       currentSceneId: null,
       chats: [],
+      workspaceMode: 'present',
       outlines: [],
       regenerationPreviewSceneIds: [],
       regenerationPreviewScenes: [],
