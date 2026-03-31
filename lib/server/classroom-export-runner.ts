@@ -1,4 +1,5 @@
-﻿import { createLogger } from '@/lib/logger';
+﻿import path from 'path';
+import { createLogger } from '@/lib/logger';
 import type { CreateCourseExportJobInput } from '@/lib/server/classroom/contracts';
 import { generateCourseExportPackage } from '@/lib/server/course-export';
 import {
@@ -18,11 +19,32 @@ export function runCourseExportJob(
 ): Promise<void> {
   const existing = runningJobs.get(jobId);
   if (existing) {
+    log.info(`Course export job ${jobId} is already running`);
     return existing;
   }
 
   const jobPromise = (async () => {
     try {
+      const existingJob = await readCourseExportJob(jobId);
+      if (!existingJob) {
+        log.warn(`Course export job ${jobId} not found before execution`);
+        return;
+      }
+      if (existingJob.status === 'succeeded') {
+        log.info(`Course export job ${jobId} already completed`);
+        return;
+      }
+      if (existingJob.status === 'failed') {
+        log.info(`Course export job ${jobId} already failed`);
+        return;
+      }
+
+      log.info(`Starting course export job ${jobId}`, {
+        classroomId,
+        includeAssets: options.includeAssets,
+        includeContext: options.includeContext,
+        includeRevisions: options.includeRevisions,
+      });
       await updateCourseExportJob(jobId, {
         status: 'running',
         step: 'packaging',
@@ -42,8 +64,13 @@ export function runCourseExportJob(
         step: 'completed',
         message: warning || 'Course export completed',
         warning,
-        filePath: `${courseExportJobDir(jobId)}\\${result.fileName}`,
+        filePath: path.join(courseExportJobDir(jobId), result.fileName),
         result,
+      });
+      log.info(`Course export job ${jobId} completed`, {
+        classroomId,
+        fileName: result.fileName,
+        downloadUrl: result.downloadUrl,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

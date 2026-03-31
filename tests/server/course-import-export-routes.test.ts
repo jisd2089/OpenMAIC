@@ -191,6 +191,10 @@ describe('course import/export route integration', () => {
       { params: Promise.resolve({ id: originalId, jobId: exportCreateBody.jobId as string }) },
     );
     expect(exportDownloadResponse.status).toBe(200);
+    expect(exportDownloadResponse.headers.get('content-disposition')).toContain(
+      'filename="Course Package Test.omaic-course.zip"',
+    );
+    expect(exportDownloadResponse.headers.get('content-disposition')).toContain("filename*=UTF-8''");
     const packageBuffer = Buffer.from(await exportDownloadResponse.arrayBuffer());
     expect(packageBuffer.length).toBeGreaterThan(0);
 

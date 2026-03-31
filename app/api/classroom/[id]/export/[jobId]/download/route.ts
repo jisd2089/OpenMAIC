@@ -4,6 +4,7 @@ import { apiError, API_ERROR_CODES } from '@/lib/server/api-response';
 import { parseWithSchema } from '@/lib/server/http-validation';
 import { classroomExportRouteParamsSchema } from '@/lib/server/classroom/contracts';
 import { readCourseExportJob } from '@/lib/server/classroom-export-store';
+import { buildAttachmentContentDisposition } from '@/lib/server/content-disposition';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,7 +28,7 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
     return new Response(buffer, {
       headers: {
         'Content-Type': 'application/zip',
-        'Content-Disposition': `attachment; filename="${job.result.fileName}"`,
+        'Content-Disposition': buildAttachmentContentDisposition(job.result.fileName),
       },
     });
   } catch (error) {

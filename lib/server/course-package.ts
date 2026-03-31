@@ -5,10 +5,47 @@ import type { ClassroomRevisionRecord, CoursePackageManifest } from '@/lib/serve
 import { coursePackageFormatVersion } from '@/lib/server/classroom/contracts';
 import { addClassroomAssetsToZip } from '@/lib/server/classroom-assets';
 
+const COURSE_PACKAGE_FILE_SUFFIX = '.omaic-course.zip';
+const MAX_COURSE_PACKAGE_FILE_NAME_BYTES = 120;
+
 function sanitizeFileName(input: string): string {
   const normalized = input.trim().replace(/[\\/:*?"<>|]/g, '-');
   const collapsed = normalized.replace(/\s+/g, ' ').trim();
-  return collapsed || 'course';
+  const stripped = collapsed.replace(/[. ]+$/g, '').trim();
+  return stripped || 'course';
+}
+
+function truncateUtf8(input: string, maxBytes: number): string {
+  if (maxBytes <= 0) {
+    return '';
+  }
+  let output = '';
+  for (const char of input) {
+    const candidate = `${output}${char}`;
+    if (Buffer.byteLength(candidate, 'utf8') > maxBytes) {
+      break;
+    }
+    output = candidate;
+  }
+  return output;
+}
+
+export function buildCoursePackageFileName(courseName: string): string {
+  const sanitized = sanitizeFileName(courseName);
+  const suffixBytes = Buffer.byteLength(COURSE_PACKAGE_FILE_SUFFIX, 'utf8');
+  const nameBudget = MAX_COURSE_PACKAGE_FILE_NAME_BYTES - suffixBytes;
+
+  if (Buffer.byteLength(sanitized, 'utf8') <= nameBudget) {
+    return `${sanitized}${COURSE_PACKAGE_FILE_SUFFIX}`;
+  }
+
+  const ellipsis = '...';
+  const truncated = truncateUtf8(
+    sanitized,
+    Math.max(1, nameBudget - Buffer.byteLength(ellipsis, 'utf8')),
+  );
+  const stableBaseName = truncated.replace(/[. ]+$/g, '').trim() || 'course';
+  return `${stableBaseName}${ellipsis}${COURSE_PACKAGE_FILE_SUFFIX}`;
 }
 
 function buildCoursePackageManifest(params: {
@@ -72,7 +109,7 @@ export async function buildCoursePackageBuffer(params: {
   });
   zip.file('manifest.json', JSON.stringify(manifest, null, 2));
 
-  const fileName = `${sanitizeFileName(params.stage.name)}.omaic-course.zip`;
+  const fileName = buildCoursePackageFileName(params.stage.name);
   const buffer = await zip.generateAsync({ type: 'nodebuffer' });
   return { buffer, fileName, manifest };
 }

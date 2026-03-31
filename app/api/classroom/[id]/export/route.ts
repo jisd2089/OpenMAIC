@@ -1,5 +1,6 @@
 ﻿import { after, type NextRequest } from 'next/server';
 import { nanoid } from 'nanoid';
+import { createLogger } from '@/lib/logger';
 import { apiError, apiSuccess, API_ERROR_CODES } from '@/lib/server/api-response';
 import { parseJsonRequestWithSchema, parseWithSchema } from '@/lib/server/http-validation';
 import {
@@ -10,6 +11,8 @@ import { buildRequestOrigin, isValidClassroomId, readClassroom } from '@/lib/ser
 import { createCourseExportJob } from '@/lib/server/classroom-export-store';
 import { runCourseExportJob } from '@/lib/server/classroom-export-runner';
 import type { CreateCourseExportJobResponseData } from '@/lib/server/classroom/types';
+
+const log = createLogger('CourseExportRoute');
 
 export async function POST(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
@@ -43,7 +46,21 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       includeRevisions: parsed.data.includeRevisions,
     });
 
-    after(() => runCourseExportJob(jobId, classroomId, parsed.data, baseUrl));
+    log.info('Queued course export job', {
+      jobId,
+      classroomId,
+      includeAssets: parsed.data.includeAssets,
+      includeContext: parsed.data.includeContext,
+      includeRevisions: parsed.data.includeRevisions,
+    });
+
+    const startJob = () => runCourseExportJob(jobId, classroomId, parsed.data, baseUrl);
+
+    // Some deployments do not reliably flush next/server `after()` callbacks before
+    // the client starts polling. Start the job immediately and keep `after()` as a
+    // compatibility fallback for runtimes that depend on it.
+    void startJob();
+    after(() => startJob());
 
     const response: CreateCourseExportJobResponseData = {
       jobId,

@@ -237,14 +237,25 @@ export function ClassroomOpsPanel({ classroomId, onReload }: ClassroomOpsPanelPr
         throw new Error(createJson.error || t('classroomOps.exportCreateFailed'));
       }
 
-      const status = await pollJson<{ job: { status: string; result?: { downloadUrl: string } } }>(
+      const status = await pollJson<{
+        job: {
+          status: string;
+          message?: string;
+          error?: string;
+          result?: { downloadUrl: string };
+        };
+      }>(
         `/api/classroom/${classroomId}/export/${createJson.jobId}`,
-        (payload) => payload.job.status === 'succeeded',
+        (payload) => payload.job.status === 'succeeded' || payload.job.status === 'failed',
         {
           requestFailed: t('classroomOps.requestFailed'),
           timeout: t('classroomOps.backgroundJobTimeout'),
         },
+        180000,
       );
+      if (status.job.status === 'failed') {
+        throw new Error(status.job.error || status.job.message || t('classroomOps.exportFailed'));
+      }
       if (!status.job.result?.downloadUrl) {
         throw new Error(t('classroomOps.exportFileNotReady'));
       }
