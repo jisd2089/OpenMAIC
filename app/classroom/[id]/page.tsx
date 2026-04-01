@@ -8,7 +8,7 @@ import { ThemeProvider } from '@/lib/hooks/use-theme';
 import { useStageStore } from '@/lib/store';
 import { loadImageMapping } from '@/lib/utils/image-storage';
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { saveAs } from 'file-saver';
 import { toast } from 'sonner';
 import { useSceneGenerator } from '@/lib/hooks/use-scene-generator';
@@ -30,6 +30,7 @@ import {
   hasGenerationContextSummary,
   mergeGenerationContextSummary,
 } from '@/lib/context/generation-context';
+import { buildClassroomPath, normalizeClassroomView } from '@/lib/classroom/view';
 
 const log = createLogger('Classroom');
 
@@ -43,8 +44,11 @@ function formatDuration(durationMs?: number) {
 
 export default function ClassroomDetailPage() {
   const params = useParams();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const classroomId = params?.id as string;
   const { t } = useI18n();
+  const classroomView = normalizeClassroomView(searchParams?.get('view'));
 
   const { loadFromStorage } = useStageStore();
   const currentScene = useStageStore((state) => state.getCurrentScene());
@@ -119,6 +123,25 @@ export default function ClassroomDetailPage() {
       toast.error(t('context.retrievalTextCopyFailed'));
     }
   }, [t]);
+
+  const handleSwitchView = useCallback(
+    (view: 'teacher' | 'student') => {
+      router.push(buildClassroomPath(classroomId, view));
+    },
+    [classroomId, router],
+  );
+
+  const handleCopyStudentLink = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(
+        `${window.location.origin}${buildClassroomPath(classroomId, 'student')}`,
+      );
+      toast.success(t('classroom.studentLinkCopied'));
+    } catch (error) {
+      log.error('Failed to copy student classroom link:', error);
+      toast.error(t('classroom.studentLinkCopyFailed'));
+    }
+  }, [classroomId, t]);
 
   const loadClassroom = useCallback(async () => {
     try {
@@ -207,17 +230,20 @@ export default function ClassroomDetailPage() {
   }, [classroomId]);
 
   const classroomOpsTabs = useMemo<ChatAreaExtraTab[]>(
-    () => [
-      {
-        value: 'classroom-ops',
-        label: t('classroomOps.title'),
-        icon: <SlidersHorizontal className="w-3.5 h-3.5" />,
-        content: (
-          <ClassroomOpsPanel classroomId={classroomId} onReload={reloadClassroomFromServer} />
-        ),
-      },
-    ],
-    [classroomId, reloadClassroomFromServer, t],
+    () =>
+      classroomView === 'teacher'
+        ? [
+            {
+              value: 'classroom-ops',
+              label: t('classroomOps.title'),
+              icon: <SlidersHorizontal className="w-3.5 h-3.5" />,
+              content: (
+                <ClassroomOpsPanel classroomId={classroomId} onReload={reloadClassroomFromServer} />
+              ),
+            },
+          ]
+        : [],
+    [classroomId, classroomView, reloadClassroomFromServer, t],
   );
 
   useEffect(() => {
@@ -324,6 +350,37 @@ export default function ClassroomDetailPage() {
     <ThemeProvider>
       <MediaStageProvider value={classroomId}>
         <div className="relative h-screen flex flex-col overflow-hidden">
+          <div className="absolute top-4 left-4 z-40">
+            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/70 bg-white/85 px-3 py-2 shadow-lg backdrop-blur dark:border-slate-700/70 dark:bg-slate-900/85">
+              <button
+                onClick={() => handleSwitchView('teacher')}
+                className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
+                  classroomView === 'teacher'
+                    ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
+                }`}
+              >
+                {t('classroom.teacherView')}
+              </button>
+              <button
+                onClick={() => handleSwitchView('student')}
+                className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
+                  classroomView === 'student'
+                    ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
+                }`}
+              >
+                {t('classroom.studentView')}
+              </button>
+              <button
+                onClick={() => void handleCopyStudentLink()}
+                className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              >
+                <Copy className="size-3.5" />
+                {t('classroom.copyStudentLink')}
+              </button>
+            </div>
+          </div>
           {contextSummary &&
           hasGenerationContextSummary(contextSummary) ? (
             <div className="absolute top-4 right-4 z-40 max-w-sm">

@@ -1,4 +1,5 @@
 import { promises as fs } from 'fs';
+import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Scene, Stage } from '@/lib/types/stage';
 import {
@@ -150,8 +151,14 @@ describe('course import/export route integration', () => {
 
     await fs.mkdir(classroomMediaDir(originalId), { recursive: true });
     await fs.mkdir(classroomAudioDir(originalId), { recursive: true });
-    await fs.writeFile(`${classroomMediaDir(originalId)}\\energy.png`, Buffer.from('image-bytes'));
-    await fs.writeFile(`${classroomAudioDir(originalId)}\\narration.mp3`, Buffer.from('audio-bytes'));
+    await fs.writeFile(
+      path.join(classroomMediaDir(originalId), 'energy.png'),
+      Buffer.from('image-bytes'),
+    );
+    await fs.writeFile(
+      path.join(classroomAudioDir(originalId), 'narration.mp3'),
+      Buffer.from('audio-bytes'),
+    );
 
     await createClassroomRevision({
       classroomId: originalId,
@@ -192,7 +199,7 @@ describe('course import/export route integration', () => {
     );
     expect(exportDownloadResponse.status).toBe(200);
     expect(exportDownloadResponse.headers.get('content-disposition')).toContain(
-      'filename="Course Package Test.omaic-course.zip"',
+      `filename="${originalId}.omaic-course.zip"`,
     );
     expect(exportDownloadResponse.headers.get('content-disposition')).toContain("filename*=UTF-8''");
     const packageBuffer = Buffer.from(await exportDownloadResponse.arrayBuffer());
@@ -204,7 +211,7 @@ describe('course import/export route integration', () => {
     const formData = new FormData();
     formData.set(
       'file',
-      new File([packageBuffer], 'Course Package Test.omaic-course.zip', {
+      new File([packageBuffer], `${originalId}.omaic-course.zip`, {
         type: 'application/zip',
       }),
     );
@@ -244,12 +251,12 @@ describe('course import/export route integration', () => {
     expect(JSON.stringify(imported?.scenes[0])).toContain(`/api/classroom-media/${importedId}/media/energy.png`);
     expect(JSON.stringify(imported?.scenes[0])).toContain(`/api/classroom-media/${importedId}/audio/narration.mp3`);
 
-    await expect(fs.readFile(`${classroomMediaDir(importedId)}\\energy.png`, 'utf-8')).resolves.toBe(
-      'image-bytes',
-    );
-    await expect(fs.readFile(`${classroomAudioDir(importedId)}\\narration.mp3`, 'utf-8')).resolves.toBe(
-      'audio-bytes',
-    );
+    await expect(
+      fs.readFile(path.join(classroomMediaDir(importedId), 'energy.png'), 'utf-8'),
+    ).resolves.toBe('image-bytes');
+    await expect(
+      fs.readFile(path.join(classroomAudioDir(importedId), 'narration.mp3'), 'utf-8'),
+    ).resolves.toBe('audio-bytes');
 
     const revisions = await listAllClassroomRevisions(importedId);
     expect(revisions).toHaveLength(1);

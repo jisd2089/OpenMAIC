@@ -208,3 +208,9 @@ export interface DiscardClassroomRegenerationResponseData {
   jobId: string;
   discarded: true;
 }
+
+export interface DeleteClassroomResponseData {
+  classroomId: string;
+  status: 'deleted';
+  deletedAt: string;
+}

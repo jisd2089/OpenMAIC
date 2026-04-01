@@ -4,15 +4,35 @@ export class ClassroomPage {
   readonly page: Page;
   readonly loadingText: Locator;
   readonly sidebarScenes: Locator;
+  readonly classroomOpsTab: Locator;
+  readonly teacherViewButton: Locator;
+  readonly studentViewButton: Locator;
 
   constructor(page: Page) {
     this.page = page;
     this.loadingText = page.getByText('Loading classroom...');
     this.sidebarScenes = page.locator('[data-testid="scene-item"]');
+    this.classroomOpsTab = page
+      .getByRole('tab', { name: /Classroom Ops/i })
+      .or(page.getByRole('tab', { name: /课堂操作/i }));
+    this.teacherViewButton = page
+      .getByRole('button', { name: /Teacher View/i })
+      .or(page.getByRole('button', { name: /教师端/i }));
+    this.studentViewButton = page
+      .getByRole('button', { name: /Student View/i })
+      .or(page.getByRole('button', { name: /学生端/i }));
   }
 
   async goto(stageId: string) {
     await this.page.goto(`/classroom/${stageId}`);
+  }
+
+  async gotoStudent(stageId: string) {
+    await this.page.goto(`/classroom/${stageId}?view=student`);
+  }
+
+  async switchToStudentView() {
+    await this.studentViewButton.click();
   }
 
   async waitForLoaded() {

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { promises as fs } from 'fs';
 import type { Scene, Stage } from '@/lib/types/stage';
 import {
   createGetRequest,
@@ -328,4 +329,101 @@ describe('classroom patch, revision, and regeneration routes', () => {
     const discardedStatusBody = await discardedStatusResponse.json();
     expect(discardedStatusBody.job.status).toBe('discarded');
   }, 20000);
+
+  it('deletes classroom data, revisions, and related jobs via DELETE /api/classroom/:id', async () => {
+    const classroomRoute = await import('@/app/api/classroom/[id]/route');
+    const { createCourseExportJob, courseExportJobDir, readCourseExportJob } = await import(
+      '@/lib/server/classroom-export-store'
+    );
+    const { createClassroomRegenerationJob, readClassroomRegenerationJob } = await import(
+      '@/lib/server/classroom-regeneration-store'
+    );
+    const {
+      persistClassroom,
+      readClassroom,
+      classroomAudioDir,
+      classroomMediaDir,
+      classroomJsonPath,
+      classroomRevisionsDir,
+    } = await import('@/lib/server/classroom-storage');
+    const { createClassroomRevision, listAllClassroomRevisions } = await import(
+      '@/lib/server/classroom-revision-store'
+    );
+
+    const classroomId = 'delete_me_course';
+    await persistClassroom(
+      {
+        id: classroomId,
+        stage: buildStage(classroomId),
+        scenes: buildScenes(classroomId),
+      },
+      'http://localhost',
+    );
+
+    await fs.mkdir(classroomMediaDir(classroomId), { recursive: true });
+    await fs.mkdir(classroomAudioDir(classroomId), { recursive: true });
+    await fs.writeFile(`${classroomMediaDir(classroomId)}\\preview.png`, Buffer.from('preview'));
+    await fs.writeFile(`${classroomAudioDir(classroomId)}\\speech.mp3`, Buffer.from('speech'));
+
+    await createClassroomRevision({
+      classroomId,
+      source: 'manual-save',
+      summary: 'Delete checkpoint',
+      stage: buildStage(classroomId),
+      scenes: buildScenes(classroomId),
+    });
+
+    await createCourseExportJob({
+      jobId: 'exp_delete_me',
+      classroomId,
+      includeAssets: true,
+      includeContext: true,
+      includeRevisions: true,
+    });
+    await fs.writeFile(`${courseExportJobDir('exp_delete_me')}\\artifact.zip`, Buffer.from('zip'));
+
+    await createClassroomRegenerationJob({
+      jobId: 'regen_delete_me',
+      classroomId,
+      targetType: 'scene',
+      targetId: 'scene_1',
+      targetSceneIds: ['scene_1'],
+      regenerateMode: 'full',
+      preserveManualEdits: true,
+      prompt: 'Delete me',
+      knowledgeBaseIds: [],
+      memoryIds: [],
+    });
+
+    const deleteResponse = await classroomRoute.DELETE(
+      createJsonRequest(`http://localhost/api/classroom/${classroomId}`, 'DELETE', {}),
+      { params: Promise.resolve({ id: classroomId }) },
+    );
+    expect(deleteResponse.status).toBe(200);
+    const deleteBody = await deleteResponse.json();
+    expect(deleteBody.classroomId).toBe(classroomId);
+    expect(deleteBody.status).toBe('deleted');
+
+    expect(await readClassroom(classroomId)).toBeNull();
+    expect(await listAllClassroomRevisions(classroomId)).toHaveLength(0);
+    expect(await readCourseExportJob('exp_delete_me')).toBeNull();
+    expect(await readClassroomRegenerationJob('regen_delete_me')).toBeNull();
+
+    await expect(fs.access(classroomJsonPath(classroomId))).rejects.toBeTruthy();
+    await expect(fs.access(classroomRevisionsDir(classroomId))).rejects.toBeTruthy();
+    await expect(fs.access(courseExportJobDir('exp_delete_me'))).rejects.toBeTruthy();
+  });
+
+  it('returns 404 when deleting a classroom that does not exist', async () => {
+    const classroomRoute = await import('@/app/api/classroom/[id]/route');
+
+    const response = await classroomRoute.DELETE(
+      createJsonRequest('http://localhost/api/classroom/missing_course', 'DELETE', {}),
+      { params: Promise.resolve({ id: 'missing_course' }) },
+    );
+
+    expect(response.status).toBe(404);
+    const body = await response.json();
+    expect(body.errorCode).toBe('CLASSROOM_NOT_FOUND');
+  });
 });

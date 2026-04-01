@@ -95,7 +95,9 @@ describe('ensureClassroomPersisted', () => {
       }),
     );
 
-    const patchPayload = JSON.parse((fetchImpl.mock.calls[0][1] as RequestInit).body as string) as {
+    const firstCall = fetchImpl.mock.calls[0] as unknown[] | undefined;
+    const requestInit = firstCall?.[1] as RequestInit;
+    const patchPayload = JSON.parse(requestInit.body as string) as {
       stage: Stage;
       scenes: Scene[];
     };

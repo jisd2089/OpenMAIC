@@ -6,7 +6,11 @@ import { buildRequestOrigin, isValidClassroomId, readClassroom } from '@/lib/ser
 import { patchClassroom } from '@/lib/server/classroom-patch';
 import { handleRouteError } from '@/lib/server/route-error';
 import { createLogger } from '@/lib/logger';
-import type { PatchClassroomResponseData } from '@/lib/server/classroom/types';
+import { deleteClassroom } from '@/lib/server/classroom-delete';
+import type {
+  DeleteClassroomResponseData,
+  PatchClassroomResponseData,
+} from '@/lib/server/classroom/types';
 
 const log = createLogger('Classroom Route');
 
@@ -55,5 +59,23 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
   } catch (error) {
     log.error('Failed to save classroom changes', error);
     return handleRouteError(error, 'Failed to save classroom changes');
+  }
+}
+
+export async function DELETE(_req: NextRequest, context: { params: Promise<{ id: string }> }) {
+  try {
+    const params = parseWithSchema(classroomRouteParamsSchema, await context.params);
+    if (!params.success) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, params.error);
+    }
+    if (!isValidClassroomId(params.data.id)) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, 'Invalid classroom id');
+    }
+
+    const result = await deleteClassroom({ classroomId: params.data.id });
+    return apiSuccess<DeleteClassroomResponseData>(result);
+  } catch (error) {
+    log.error('Failed to delete classroom', error);
+    return handleRouteError(error, 'Failed to delete classroom');
   }
 }

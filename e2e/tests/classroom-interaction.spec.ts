@@ -145,4 +145,24 @@ test.describe('Classroom Interaction', () => {
     // Verify second scene is now active — heading in the top bar shows the current scene name
     await expect(page.getByRole('heading', { name: '光反应' })).toBeVisible();
   });
+
+  test('hides classroom ops in student view', async ({ page }) => {
+    const classroom = new ClassroomPage(page);
+    await classroom.gotoStudent(TEST_STAGE_ID);
+    await classroom.waitForLoaded();
+
+    await expect(classroom.classroomOpsTab).toHaveCount(0);
+    await expect(classroom.sidebarScenes).toHaveCount(3, { timeout: 10_000 });
+  });
+
+  test('switches from teacher view to student view inside the classroom page', async ({ page }) => {
+    const classroom = new ClassroomPage(page);
+    await classroom.goto(TEST_STAGE_ID);
+    await classroom.waitForLoaded();
+
+    await expect(classroom.classroomOpsTab).toHaveCount(1);
+    await classroom.switchToStudentView();
+    await expect(classroom.classroomOpsTab).toHaveCount(0);
+    await expect(classroom.sidebarScenes).toHaveCount(3, { timeout: 10_000 });
+  });
 });

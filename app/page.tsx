@@ -61,6 +61,7 @@ import { DEFAULT_SCOPE_ID } from '@/lib/constants/scope';
 import { buildGenerationSessionStorage } from '@/lib/generation/session-storage';
 import type { KnowledgeBaseSummary } from '@/lib/server/kb/contracts';
 import type { MemoryNoteSummary } from '@/lib/server/memory/contracts';
+import { buildClassroomPath } from '@/lib/classroom/view';
 
 const log = createLogger('Home');
 
@@ -306,11 +307,23 @@ function HomePage() {
   const confirmDelete = async (id: string) => {
     setPendingDeleteId(null);
     try {
+      const response = await fetch(`/api/classroom/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { error?: string; errorCode?: string }
+        | null;
+
+      if (!response.ok && payload?.errorCode !== 'CLASSROOM_NOT_FOUND') {
+        throw new Error(payload?.error || 'Failed to delete classroom');
+      }
+
       await deleteStageData(id);
       await loadClassrooms();
+      toast.success(t('classroom.deleteSuccess'));
     } catch (err) {
       log.error('Failed to delete classroom:', err);
-      toast.error('Failed to delete classroom');
+      toast.error(t('classroom.deleteFailed'));
     }
   };
 
@@ -1291,7 +1304,10 @@ function HomePage() {
                         confirmingDelete={pendingDeleteId === classroom.id}
                         onConfirmDelete={() => confirmDelete(classroom.id)}
                         onCancelDelete={() => setPendingDeleteId(null)}
-                        onClick={() => router.push(`/classroom/${classroom.id}`)}
+                        onClick={() => router.push(buildClassroomPath(classroom.id))}
+                        onOpenStudentView={() =>
+                          router.push(buildClassroomPath(classroom.id, 'student'))
+                        }
                       />
                     </motion.div>
                   ))}
@@ -1610,6 +1626,7 @@ function ClassroomCard({
   onConfirmDelete,
   onCancelDelete,
   onClick,
+  onOpenStudentView,
 }: {
   classroom: StageListItem;
   slide?: Slide;
@@ -1619,10 +1636,23 @@ function ClassroomCard({
   onConfirmDelete: () => void;
   onCancelDelete: () => void;
   onClick: () => void;
+  onOpenStudentView: () => void;
 }) {
   const { t } = useI18n();
   const thumbRef = useRef<HTMLDivElement>(null);
   const [thumbWidth, setThumbWidth] = useState(0);
+
+  const handleCopyStudentLink = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(
+        `${window.location.origin}${buildClassroomPath(classroom.id, 'student')}`,
+      );
+      toast.success(t('classroom.studentLinkCopied'));
+    } catch {
+      toast.error(t('classroom.studentLinkCopyFailed'));
+    }
+  };
 
   useEffect(() => {
     const el = thumbRef.current;
@@ -1762,6 +1792,25 @@ function ClassroomCard({
             </div>
           </TooltipContent>
         </Tooltip>
+      </div>
+
+      <div className="mt-2 px-1 flex items-center gap-2">
+        <button
+          className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700 transition hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenStudentView();
+          }}
+        >
+          {t('classroom.studentView')}
+        </button>
+        <button
+          className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700 transition hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+          onClick={handleCopyStudentLink}
+        >
+          <Copy className="size-3" />
+          {t('classroom.copyStudentLink')}
+        </button>
       </div>
     </div>
   );
