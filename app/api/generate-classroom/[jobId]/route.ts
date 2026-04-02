@@ -25,6 +25,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ jobId: 
 
     return apiSuccess({
       jobId: job.id,
+      classroomId: job.classroomId,
       status: job.status,
       step: job.step,
       progress: job.progress,

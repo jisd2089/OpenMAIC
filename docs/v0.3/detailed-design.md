@@ -214,11 +214,12 @@ data/course-exports/                      # 仅删除明确归属该 classroomId
 1. `POST /api/generate-classroom`
 2. `GET /api/generate-classroom/{jobId}`
 
-现有实现已满足：
+`v0.3` 接口契约需明确：
 
-1. 创建任务返回 `jobId`
-2. 状态查询成功态返回 `result.classroomId`
-3. 状态查询成功态返回 `result.url`
+1. 创建任务请求体支持 `type`，取值为 `course` 或 `knowledge`
+2. 创建任务返回 `jobId` 和预分配的 `classroomId`
+3. 状态查询成功态返回 `result.classroomId`，且与创建任务响应中的 `classroomId` 一致
+4. 状态查询成功态返回 `result.url`
 
 `v0.3` 设计重点不是重写链路，而是固定接口契约并补全对外文档。
 

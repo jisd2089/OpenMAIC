@@ -67,6 +67,7 @@
 
 ```json
 {
+  "type": "course",
   "requirement": "生成一门面向高中生的牛顿第二定律互动课堂",
   "language": "zh-CN",
   "scopeId": "scope-default",
@@ -84,6 +85,7 @@
 {
   "success": true,
   "jobId": "job_abc123",
+  "classroomId": "cls_newton_001",
   "status": "queued",
   "step": "queued",
   "message": "Classroom generation job queued",
@@ -94,8 +96,10 @@
 
 说明：
 
-1. 创建接口可以先返回 `jobId`
-2. 若采用异步任务模式，`classroomId` 在任务成功态返回
+1. 请求体支持 `type` 字段，允许值为 `course` 或 `knowledge`
+2. 若未显式传入 `type`，服务端按 `course` 兼容处理
+3. 创建接口必须返回 `jobId` 和预分配的 `classroomId`
+4. 若采用异步任务模式，任务成功态仍需返回同一个 `classroomId`
 
 ### 3.2 查询课堂生成任务
 
@@ -107,6 +111,7 @@
 {
   "success": true,
   "jobId": "job_abc123",
+  "classroomId": "cls_newton_001",
   "status": "succeeded",
   "step": "completed",
   "progress": 100,
@@ -130,6 +135,7 @@
 {
   "success": true,
   "jobId": "job_abc123",
+  "classroomId": "cls_newton_001",
   "status": "failed",
   "step": "failed",
   "progress": 73,
@@ -141,9 +147,11 @@
 
 约束：
 
-1. 当 `status = succeeded` 时，`result.classroomId` 必须存在
-2. 当 `status = succeeded` 时，`result.url` 必须存在
-3. 调用方不得依赖页面跳转来获取 `classroomId`
+1. 创建任务响应中的 `classroomId` 必须存在，且可作为课堂主键稳定使用
+2. 当 `status = succeeded` 时，`result.classroomId` 必须存在
+3. 当 `status = succeeded` 时，`result.classroomId` 必须与创建任务响应中的 `classroomId` 一致
+4. 当 `status = succeeded` 时，`result.url` 必须存在
+5. 调用方不得依赖页面跳转来获取 `classroomId`
 
 ## 4. 课堂删除接口
 
@@ -239,7 +247,7 @@
 ## 7. 兼容策略
 
 1. 保持现有 `POST /api/generate-classroom` 与 `GET /api/generate-classroom/:jobId` 路径不变
-2. 在不破坏现有异步任务模型的前提下，明确“成功态必须返回 `classroomId`”
+2. 在不破坏现有异步任务模型的前提下，明确“创建任务响应与成功态都必须返回 `classroomId`”
 3. 新增 `DELETE /api/classroom/:id` 作为统一服务端删除入口
 4. 教师端视图保持现有课堂页默认行为，学生端在同一课堂真值上进行只读化裁剪
 5. 课堂导出下载文件名从课程标题等展示名收敛为 `classroomId`

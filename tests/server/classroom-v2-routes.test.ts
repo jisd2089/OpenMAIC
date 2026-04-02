@@ -72,6 +72,10 @@ function buildStage(id: string): Stage {
   };
 }
 
+function buildLongStageName(length: number): string {
+  return `Course ${'x'.repeat(Math.max(0, length - 'Course '.length))}`;
+}
+
 function buildScenes(stageId: string): Scene[] {
   return [
     {
@@ -136,6 +140,39 @@ describe('classroom patch, revision, and regeneration routes', () => {
     expect(saved?.stage.name).toBe('Editable Course');
     expect(saved?.stage.isDraft).toBe(true);
     expect(saved?.scenes[0].stageId).toBe(classroomId);
+  });
+
+  it('truncates classroom titles to 30 characters when saving drafts', async () => {
+    const classroomRoute = await import('@/app/api/classroom/[id]/route');
+    const { persistClassroom, readClassroom } = await import('@/lib/server/classroom-storage');
+
+    const classroomId = 'long_name_course';
+    const longName = buildLongStageName(31);
+    await persistClassroom(
+      {
+        id: classroomId,
+        stage: {
+          ...buildStage(classroomId),
+          name: longName,
+        },
+        scenes: buildScenes(classroomId),
+      },
+      'http://localhost',
+    );
+
+    const patchResponse = await classroomRoute.PATCH(
+      createJsonRequest(`http://localhost/api/classroom/${classroomId}`, 'PATCH', {
+        stage: { name: longName, description: 'Draft save with long title' },
+        scenes: [],
+        saveMode: 'draft',
+      }),
+      { params: Promise.resolve({ id: classroomId }) },
+    );
+
+    expect(patchResponse.status).toBe(200);
+    const saved = await readClassroom(classroomId);
+    expect(saved?.stage.name).toBe(Array.from(longName).slice(0, 30).join(''));
+    expect(Array.from(saved?.stage.name || '')).toHaveLength(30);
   });
 
   it('supports patch save, revision create/restore, and regeneration preview/apply/discard', async () => {
@@ -401,8 +438,11 @@ describe('classroom patch, revision, and regeneration routes', () => {
     );
     expect(deleteResponse.status).toBe(200);
     const deleteBody = await deleteResponse.json();
+    expect(deleteBody.success).toBe(true);
     expect(deleteBody.classroomId).toBe(classroomId);
     expect(deleteBody.status).toBe('deleted');
+    expect(typeof deleteBody.deletedAt).toBe('string');
+    expect(Number.isNaN(Date.parse(deleteBody.deletedAt as string))).toBe(false);
 
     expect(await readClassroom(classroomId)).toBeNull();
     expect(await listAllClassroomRevisions(classroomId)).toHaveLength(0);
@@ -425,5 +465,18 @@ describe('classroom patch, revision, and regeneration routes', () => {
     expect(response.status).toBe(404);
     const body = await response.json();
     expect(body.errorCode).toBe('CLASSROOM_NOT_FOUND');
+  });
+
+  it('returns 400 when deleting a classroom with an invalid id', async () => {
+    const classroomRoute = await import('@/app/api/classroom/[id]/route');
+
+    const response = await classroomRoute.DELETE(
+      createJsonRequest('http://localhost/api/classroom/invalid/id', 'DELETE', {}),
+      { params: Promise.resolve({ id: 'invalid/id' }) },
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.errorCode).toBe('INVALID_REQUEST');
   });
 });

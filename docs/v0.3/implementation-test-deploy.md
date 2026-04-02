@@ -131,7 +131,8 @@
 1. `DELETE /api/classroom/:id` 成功删除
 2. `DELETE /api/classroom/:id` 课堂不存在
 3. 导出下载接口文件名为 `{classroomId}.omaic-course.zip`
-4. 生成任务成功态响应含 `result.classroomId`
+4. `POST /api/generate-classroom` 支持 `type = course | knowledge`
+5. 生成任务创建响应含 `classroomId`，成功态响应含 `result.classroomId`
 
 ### 4.3 E2E
 
@@ -163,9 +164,10 @@
 
 1. 教师端进入课堂，确认“课堂操作”可见
 2. 学生端进入同一课堂，确认“课堂操作”不可见
-3. 课堂生成成功后，轮询响应中可读取 `classroomId`
-4. 课堂导出后，下载文件名为 `{classroomId}.omaic-course.zip`
-5. 首页删除课堂后，刷新页面不再出现该课堂
+3. 分别使用 `type=course` 与 `type=knowledge` 创建任务，请求均能通过校验
+4. 创建生成任务后，可立即从响应中读取 `classroomId`，且成功轮询响应中的 `result.classroomId` 与其一致
+5. 课堂导出后，下载文件名为 `{classroomId}.omaic-course.zip`
+6. 首页删除课堂后，刷新页面不再出现该课堂
 
 ## 6. 风险与注意事项
 

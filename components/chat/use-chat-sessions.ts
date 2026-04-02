@@ -1279,7 +1279,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
    * Deduplicates: returns existing active lecture session for the same sceneId if found.
    */
   const startLecture = useCallback(
-    async (sceneId: string): Promise<string> => {
+    async (sceneId: string, options?: { restart?: boolean }): Promise<string> => {
       // Check for existing lecture session with same sceneId (active or completed)
       const existing = sessions.find(
         (s) =>
@@ -1288,6 +1288,50 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
           (s.status === 'active' || s.status === 'completed'),
       );
       if (existing) {
+        if (options?.restart) {
+          const now = Date.now();
+          const messageId = `lecture-msg-${now}`;
+          const agentConfig = useAgentRegistry.getState().getAgent('default-1');
+
+          const lectureMessage: UIMessage<ChatMessageMetadata> = {
+            id: messageId,
+            role: 'assistant',
+            parts: [],
+            metadata: {
+              senderName: agentConfig?.name || t('settings.agentNames.default-1'),
+              senderAvatar: agentConfig?.avatar,
+              originalRole: 'teacher',
+              agentId: 'default-1',
+              createdAt: now,
+            },
+          };
+
+          const buffer = buffersRef.current.get(existing.id);
+          if (buffer) {
+            buffer.shutdown();
+            buffersRef.current.delete(existing.id);
+          }
+
+          lectureMessageIds.current.set(existing.id, messageId);
+          lectureLastActionIndexRef.current.set(existing.id, -1);
+          setSessions((prev) =>
+            prev.map((s) =>
+              s.id === existing.id
+                ? {
+                    ...s,
+                    status: 'active' as SessionStatus,
+                    messages: [lectureMessage],
+                    lastActionIndex: -1,
+                    updatedAt: now,
+                  }
+                : s,
+            ),
+          );
+          setActiveSessionId(existing.id);
+          setExpandedSessionIds((prev) => new Set([...prev, existing.id]));
+          return existing.id;
+        }
+
         // Reactivate a completed session so the chat panel shows it as active again.
         // Actions won't be re-appended because lastActionIndex already covers them.
         if (existing.status === 'completed') {

@@ -152,6 +152,7 @@ export const sceneActionsRequestSchema = z.object({
 });
 
 export const generateClassroomRequestSchema = z.object({
+  type: z.enum(['course', 'knowledge']).default('course'),
   requirement: z.string().trim().min(1),
   scopeId: optionalScopeSchema,
   pdfContent: z

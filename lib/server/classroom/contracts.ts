@@ -1,8 +1,10 @@
 ﻿import { z } from 'zod';
 import { DEFAULT_SCOPE_ID } from '@/lib/server/db/schema/common';
 import { normalizeScopeId } from '@/lib/constants/scope';
+import { CLASSROOM_NAME_MAX_LENGTH, normalizeClassroomName } from '@/lib/classroom/name';
 
 export const coursePackageFormatVersion = 2 as const;
+export const classroomNameMaxLength = CLASSROOM_NAME_MAX_LENGTH;
 
 const classroomIdPattern = /^[a-zA-Z0-9_-]+$/;
 const routeIdSchema = z.string().trim().min(1).regex(classroomIdPattern);
@@ -51,11 +53,23 @@ export const courseImportFormFieldsSchema = z.object({
 });
 
 export const applyCourseImportSchema = z.object({
-  courseNameOverride: z.string().trim().min(1).max(200).optional(),
+  courseNameOverride: z
+    .string()
+    .trim()
+    .min(1)
+    .max(1000)
+    .transform((value) => normalizeClassroomName(value))
+    .optional(),
 });
 
 const stageDraftPatchSchema = z.object({
-  name: z.string().trim().min(1).max(200).optional(),
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(1000)
+    .transform((value) => normalizeClassroomName(value))
+    .optional(),
   description: z.string().trim().max(4000).nullable().optional(),
   language: z.string().trim().min(1).max(32).optional(),
   style: z.string().trim().min(1).max(120).optional(),

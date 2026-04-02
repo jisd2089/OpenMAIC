@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import type { NextRequest } from 'next/server';
 import type { Scene, Stage } from '@/lib/types/stage';
+import { normalizeClassroomName } from '@/lib/classroom/name';
 
 export const CLASSROOMS_DIR = path.join(process.cwd(), 'data', 'classrooms');
 export const CLASSROOM_JOBS_DIR = path.join(process.cwd(), 'data', 'classroom-jobs');
@@ -114,9 +115,14 @@ export async function persistClassroom(
   baseUrl: string,
   options?: { createdAt?: string },
 ): Promise<PersistedClassroomData & { url: string }> {
+  const normalizedStage: Stage = {
+    ...data.stage,
+    name: normalizeClassroomName(data.stage.name || 'Untitled Stage'),
+  };
+
   const classroomData: PersistedClassroomData = {
     id: data.id,
-    stage: data.stage,
+    stage: normalizedStage,
     scenes: data.scenes,
     createdAt: options?.createdAt || new Date().toISOString(),
   };

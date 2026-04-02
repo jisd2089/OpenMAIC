@@ -22,10 +22,11 @@ export function runClassroomGenerationJob(
 
   const jobPromise = (async () => {
     try {
-      await markClassroomGenerationJobRunning(jobId);
+      const job = await markClassroomGenerationJobRunning(jobId);
 
       const result = await generateClassroom(input, {
         baseUrl,
+        classroomId: job.classroomId,
         onProgress: async (progress) => {
           await updateClassroomGenerationJobProgress(jobId, progress);
         },

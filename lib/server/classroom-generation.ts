@@ -1,4 +1,3 @@
-import { nanoid } from 'nanoid';
 import { callLLM } from '@/lib/ai/llm';
 import { createStageAPI } from '@/lib/api/stage-api';
 import type { StageStore } from '@/lib/api/stage-api-types';
@@ -40,6 +39,7 @@ import type {
 const log = createLogger('Classroom');
 
 export interface GenerateClassroomInput {
+  type: 'course' | 'knowledge';
   requirement: string;
   scopeId?: string;
   pdfContent?: { text: string; images: string[] };
@@ -183,6 +183,7 @@ export async function generateClassroom(
   input: GenerateClassroomInput,
   options: {
     baseUrl: string;
+    classroomId: string;
     onProgress?: (progress: ClassroomGenerationProgress) => Promise<void> | void;
   },
 ): Promise<GenerateClassroomResult> {
@@ -326,9 +327,9 @@ export async function generateClassroom(
     totalScenes: outlines.length,
   });
 
-  const stageId = nanoid(10);
+  const classroomId = options.classroomId;
   const stage: Stage = {
-    id: stageId,
+    id: classroomId,
     name: outlines[0]?.title || requirement.slice(0, 50),
     description: undefined,
     language: lang,
@@ -469,7 +470,7 @@ export async function generateClassroom(
     });
 
     try {
-      const mediaMap = await generateMediaForClassroom(outlines, stageId, options.baseUrl);
+      const mediaMap = await generateMediaForClassroom(outlines, classroomId, options.baseUrl);
       replaceMediaPlaceholders(scenes, mediaMap);
       log.info(`Media generation complete: ${Object.keys(mediaMap).length} files`);
     } catch (err) {
@@ -488,7 +489,7 @@ export async function generateClassroom(
     });
 
     try {
-      await generateTTSForClassroom(scenes, stageId, options.baseUrl);
+      await generateTTSForClassroom(scenes, classroomId, options.baseUrl);
       log.info('TTS generation complete');
     } catch (err) {
       log.warn('TTS generation phase failed, continuing:', err);
@@ -505,7 +506,7 @@ export async function generateClassroom(
 
   const persisted = await persistClassroom(
     {
-      id: stageId,
+      id: classroomId,
       stage,
       scenes,
     },

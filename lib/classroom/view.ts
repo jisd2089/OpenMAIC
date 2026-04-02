@@ -6,5 +6,5 @@ export function normalizeClassroomView(view?: string | null): ClassroomView {
 
 export function buildClassroomPath(classroomId: string, view: ClassroomView = 'teacher'): string {
   const encodedId = encodeURIComponent(classroomId);
-  return view === 'student' ? `/classroom/${encodedId}?view=student` : `/classroom/${encodedId}`;
+  return `/classroom/${encodedId}?view=${view}`;
 }

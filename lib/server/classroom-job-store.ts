@@ -1,5 +1,6 @@
 import { promises as fs } from 'fs';
 import path from 'path';
+import { nanoid } from 'nanoid';
 import type {
   ClassroomGenerationProgress,
   ClassroomGenerationStep,
@@ -16,6 +17,7 @@ export type ClassroomGenerationJobStatus = 'queued' | 'running' | 'succeeded' | 
 
 export interface ClassroomGenerationJob {
   id: string;
+  classroomId: string;
   status: ClassroomGenerationJobStatus;
   step: ClassroomGenerationStep | 'queued' | 'failed';
   progress: number;
@@ -25,6 +27,7 @@ export interface ClassroomGenerationJob {
   startedAt?: string;
   completedAt?: string;
   inputSummary: {
+    type: GenerateClassroomInput['type'];
     requirementPreview: string;
     language: string;
     hasPdf: boolean;
@@ -47,6 +50,7 @@ function jobFilePath(jobId: string) {
 
 function buildInputSummary(input: GenerateClassroomInput): ClassroomGenerationJob['inputSummary'] {
   return {
+    type: input.type,
     requirementPreview:
       input.requirement.length > 200 ? `${input.requirement.slice(0, 197)}...` : input.requirement,
     language: input.language || 'zh-CN',
@@ -95,6 +99,25 @@ function markStaleIfNeeded(job: ClassroomGenerationJob): ClassroomGenerationJob 
   return job;
 }
 
+function normalizePersistedJob(job: ClassroomGenerationJob): ClassroomGenerationJob {
+  const normalized = job.classroomId
+    ? job
+    : job.result?.classroomId
+      ? {
+          ...job,
+          classroomId: job.result.classroomId,
+        }
+      : job;
+
+  return {
+    ...normalized,
+    inputSummary: {
+      ...normalized.inputSummary,
+      type: normalized.inputSummary?.type || 'course',
+    },
+  };
+}
+
 export function isValidClassroomJobId(jobId: string): boolean {
   return /^[a-zA-Z0-9_-]+$/.test(jobId);
 }
@@ -102,10 +125,12 @@ export function isValidClassroomJobId(jobId: string): boolean {
 export async function createClassroomGenerationJob(
   jobId: string,
   input: GenerateClassroomInput,
+  classroomId = nanoid(10),
 ): Promise<ClassroomGenerationJob> {
   const now = new Date().toISOString();
   const job: ClassroomGenerationJob = {
     id: jobId,
+    classroomId,
     status: 'queued',
     step: 'queued',
     progress: 0,
@@ -126,7 +151,7 @@ export async function readClassroomGenerationJob(
 ): Promise<ClassroomGenerationJob | null> {
   try {
     const content = await fs.readFile(jobFilePath(jobId), 'utf-8');
-    const job = JSON.parse(content) as ClassroomGenerationJob;
+    const job = normalizePersistedJob(JSON.parse(content) as ClassroomGenerationJob);
     return markStaleIfNeeded(job);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -169,6 +194,7 @@ export async function markClassroomGenerationJobRunning(
     const updated: ClassroomGenerationJob = {
       ...existing,
       status: 'running',
+      classroomId: existing.classroomId || existing.result?.classroomId || nanoid(10),
       startedAt: existing.startedAt || new Date().toISOString(),
       message: 'Classroom generation started',
       updatedAt: new Date().toISOString(),

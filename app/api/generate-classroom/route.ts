@@ -29,6 +29,7 @@ export async function POST(req: NextRequest) {
     return apiSuccess(
       {
         jobId,
+        classroomId: job.classroomId,
         status: job.status,
         step: job.step,
         message: job.message,

@@ -209,7 +209,10 @@ export class PlaybackEngine {
         this.playBrowserTTSChunk();
       } else if (this.audioPlayer.hasActiveAudio()) {
         // Audio is paused — resume it; TTS onend will call processNext
-        this.audioPlayer.resume();
+        const resumed = this.audioPlayer.resume();
+        if (!resumed) {
+          this.processNext();
+        }
       } else if (this.speechTimerRemaining > 0) {
         // Reading timer was paused — reschedule with remaining time
         this.speechTimerStart = Date.now();

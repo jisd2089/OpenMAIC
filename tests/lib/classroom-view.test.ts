@@ -14,8 +14,8 @@ describe('normalizeClassroomView', () => {
   });
 
   it('builds stable teacher and student classroom paths', () => {
-    expect(buildClassroomPath('course_1')).toBe('/classroom/course_1');
-    expect(buildClassroomPath('course_1', 'teacher')).toBe('/classroom/course_1');
+    expect(buildClassroomPath('course_1')).toBe('/classroom/course_1?view=teacher');
+    expect(buildClassroomPath('course_1', 'teacher')).toBe('/classroom/course_1?view=teacher');
     expect(buildClassroomPath('course_1', 'student')).toBe('/classroom/course_1?view=student');
   });
 });

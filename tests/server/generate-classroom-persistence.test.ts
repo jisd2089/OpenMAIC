@@ -192,7 +192,8 @@ Chloroplast video transcript about ATP conversion.
       metadata: { source: 'persistence-test' },
     });
 
-    await createClassroomGenerationJob('job_persisted_classroom', {
+    const createdJob = await createClassroomGenerationJob('job_persisted_classroom', {
+      type: 'knowledge',
       requirement: 'Build a chloroplast energy lesson',
       language: 'en-US',
       scopeId: 'scope-classroom-persist',
@@ -210,10 +211,12 @@ Chloroplast video transcript about ATP conversion.
         },
       ],
     });
+    expect(createdJob.classroomId).toBeTruthy();
 
     await runClassroomGenerationJob(
       'job_persisted_classroom',
       {
+        type: 'knowledge',
         requirement: 'Build a chloroplast energy lesson',
         language: 'en-US',
         scopeId: 'scope-classroom-persist',
@@ -236,7 +239,9 @@ Chloroplast video transcript about ATP conversion.
 
     const job = await readClassroomGenerationJob('job_persisted_classroom');
     expect(job?.status).toBe('succeeded');
+    expect(job?.classroomId).toBe(createdJob.classroomId);
     expect(job?.result?.classroomId).toBeTruthy();
+    expect(job?.result?.classroomId).toBe(createdJob.classroomId);
     expect(job?.result?.url).toBe(`http://localhost/classroom/${job?.result?.classroomId}`);
 
     const persisted = await readClassroom(job!.result!.classroomId);
