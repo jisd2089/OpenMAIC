@@ -55,6 +55,7 @@ export async function saveStageData(stageId: string, data: StageStoreData): Prom
       style: data.stage.style,
       currentSceneId: data.currentSceneId || undefined,
       agentIds: data.stage.agentIds,
+      generatedAgents: data.stage.generatedAgents,
       generationContext: data.stage.generationContext,
     });
 

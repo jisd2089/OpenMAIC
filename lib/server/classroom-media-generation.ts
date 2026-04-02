@@ -34,6 +34,10 @@ import { generateImageWithLogging } from '@/lib/server/image-generation';
 import { splitLongSpeechActions } from '@/lib/audio/tts-utils';
 import { generateVideoWithLogging, normalizeServerVideoGenerationOptions } from '@/lib/server/video-generation';
 import { generateTTSWithLogging } from '@/lib/server/tts-generation';
+import type {
+  ClassroomMediaConfig,
+  ClassroomTTSConfig,
+} from '@/lib/server/classroom-generation';
 
 const log = createLogger('ClassroomMedia');
 
@@ -70,6 +74,9 @@ export async function generateMediaForClassroom(
   outlines: SceneOutline[],
   classroomId: string,
   baseUrl: string,
+  options?: {
+    config?: ClassroomMediaConfig;
+  },
 ): Promise<Record<string, string>> {
   const mediaDir = path.join(CLASSROOMS_DIR, classroomId, 'media');
   await ensureDir(mediaDir);
@@ -79,8 +86,8 @@ export async function generateMediaForClassroom(
   if (requests.length === 0) return {};
 
   // Resolve providers
-  const imageProviderId = getPreferredServerImageProviderId();
-  const videoProviderId = getPreferredServerVideoProviderId();
+  const imageProviderId = options?.config?.imageProviderId || getPreferredServerImageProviderId();
+  const videoProviderId = options?.config?.videoProviderId || getPreferredServerVideoProviderId();
 
   const mediaMap: Record<string, string> = {};
 
@@ -96,16 +103,21 @@ export async function generateMediaForClassroom(
     for (const req of imageRequests) {
       try {
         const providerId = imageProviderId as ImageProviderId;
-        const apiKey = resolveImageApiKey(providerId);
+        const apiKey = options?.config?.imageApiKey || resolveImageApiKey(providerId);
         if (!apiKey) {
           log.warn(`No API key for image provider "${providerId}", skipping ${req.elementId}`);
           continue;
         }
         const providerConfig = IMAGE_PROVIDERS[providerId];
-        const model = providerConfig?.models?.[0]?.id;
+        const model = options?.config?.imageModel || providerConfig?.models?.[0]?.id;
 
         const result = await generateImageWithLogging(
-          { providerId, apiKey, baseUrl: resolveImageBaseUrl(providerId), model },
+          {
+            providerId,
+            apiKey,
+            baseUrl: options?.config?.imageBaseUrl || resolveImageBaseUrl(providerId),
+            model,
+          },
           { prompt: req.prompt, aspectRatio: req.aspectRatio || '16:9' },
           log,
         );
@@ -141,13 +153,13 @@ export async function generateMediaForClassroom(
     for (const req of videoRequests) {
       try {
         const providerId = videoProviderId as VideoProviderId;
-        const apiKey = resolveVideoApiKey(providerId);
+        const apiKey = options?.config?.videoApiKey || resolveVideoApiKey(providerId);
         if (!apiKey) {
           log.warn(`No API key for video provider "${providerId}", skipping ${req.elementId}`);
           continue;
         }
         const providerConfig = VIDEO_PROVIDERS[providerId];
-        const model = providerConfig?.models?.[0]?.id;
+        const model = options?.config?.videoModel || providerConfig?.models?.[0]?.id;
 
         const normalized = normalizeServerVideoGenerationOptions(providerId, {
           prompt: req.prompt,
@@ -155,7 +167,12 @@ export async function generateMediaForClassroom(
         });
 
         const result = await generateVideoWithLogging(
-          { providerId, apiKey, baseUrl: resolveVideoBaseUrl(providerId), model },
+          {
+            providerId,
+            apiKey,
+            baseUrl: options?.config?.videoBaseUrl || resolveVideoBaseUrl(providerId),
+            model,
+          },
           normalized,
           log,
         );
@@ -213,24 +230,32 @@ export async function generateTTSForClassroom(
   scenes: Scene[],
   classroomId: string,
   baseUrl: string,
+  options?: {
+    config?: ClassroomTTSConfig;
+  },
 ): Promise<void> {
   const audioDir = path.join(CLASSROOMS_DIR, classroomId, 'audio');
   await ensureDir(audioDir);
 
   // Resolve TTS provider (exclude browser-native-tts)
-  const providerId = getPreferredServerTTSProviderId();
+  const providerId = (options?.config?.providerId || getPreferredServerTTSProviderId()) as
+    | TTSProviderId
+    | undefined;
   if (!providerId) {
     log.warn('No server TTS provider configured, skipping TTS generation');
     return;
   }
 
-  const apiKey = resolveTTSApiKey(providerId);
+  const apiKey = options?.config?.apiKey || resolveTTSApiKey(providerId);
   if (!apiKey) {
     log.warn(`No API key for TTS provider "${providerId}", skipping TTS generation`);
     return;
   }
-  const ttsBaseUrl = resolveTTSBaseUrl(providerId) || TTS_PROVIDERS[providerId]?.defaultBaseUrl;
-  const voice = DEFAULT_TTS_VOICES[providerId] || 'default';
+  const ttsBaseUrl =
+    options?.config?.baseUrl ||
+    resolveTTSBaseUrl(providerId) ||
+    TTS_PROVIDERS[providerId]?.defaultBaseUrl;
+  const voice = options?.config?.voice || DEFAULT_TTS_VOICES[providerId] || 'default';
   for (const scene of scenes) {
     if (!scene.actions) continue;
 
@@ -245,7 +270,13 @@ export async function generateTTSForClassroom(
 
       try {
         const result = await generateTTSWithLogging(
-          { providerId, apiKey, baseUrl: ttsBaseUrl, voice, speed: speechAction.speed },
+          {
+            providerId,
+            apiKey,
+            baseUrl: ttsBaseUrl,
+            voice,
+            speed: options?.config?.speed ?? speechAction.speed,
+          },
           speechAction.text,
           log,
           audioId,

@@ -274,4 +274,90 @@ describe('generate-classroom background job integration', () => {
     const invalidBody = await invalidResponse.json();
     expect(invalidBody.errorCode).toBe('INVALID_REQUEST');
   });
+
+  it('preserves request generation config for background execution', async () => {
+    const generateClassroomRoute = await import('@/app/api/generate-classroom/route');
+
+    generateClassroomMock.mockResolvedValueOnce({
+      id: 'classroom_configured',
+      url: 'http://localhost/classroom/classroom_configured',
+      stage: {
+        id: 'classroom_configured',
+        name: 'Configured Classroom',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+      scenes: [],
+      scenesCount: 0,
+      createdAt: new Date().toISOString(),
+    });
+
+    const response = await generateClassroomRoute.POST(
+      createJsonRequest(
+        'http://localhost/api/generate-classroom',
+        'POST',
+        {
+          type: 'course',
+          requirement: 'Create a configured classroom',
+          language: 'en-US',
+          enableImageGeneration: true,
+          enableVideoGeneration: true,
+          enableTTS: true,
+        },
+        {
+          'x-model': 'openai:gpt-4o-mini',
+          'x-api-key': 'client-model-key',
+          'x-base-url': 'https://example.invalid/llm',
+          'x-provider-type': 'openai',
+          'x-requires-api-key': 'true',
+          'x-image-provider': 'seedream',
+          'x-image-model': 'seedream-v1',
+          'x-image-api-key': 'image-key',
+          'x-image-base-url': 'https://example.invalid/image',
+          'x-video-provider': 'seedance',
+          'x-video-model': 'seedance-v1',
+          'x-video-api-key': 'video-key',
+          'x-video-base-url': 'https://example.invalid/video',
+          'x-tts-provider': 'openai-tts',
+          'x-tts-voice': 'alloy',
+          'x-tts-speed': '1.25',
+          'x-tts-api-key': 'tts-key',
+          'x-tts-base-url': 'https://example.invalid/tts',
+        },
+      ),
+    );
+
+    expect(response.status).toBe(202);
+    expect(scheduledCallbacks).toHaveLength(1);
+
+    await scheduledCallbacks[0]?.();
+
+    expect(generateClassroomMock).toHaveBeenCalledTimes(1);
+    expect(generateClassroomMock.mock.calls[0]?.[0]).toMatchObject({
+      modelConfig: {
+        modelString: 'openai:gpt-4o-mini',
+        apiKey: 'client-model-key',
+        baseUrl: 'https://example.invalid/llm',
+        providerType: 'openai',
+        requiresApiKey: true,
+      },
+      mediaConfig: {
+        imageProviderId: 'seedream',
+        imageModel: 'seedream-v1',
+        imageApiKey: 'image-key',
+        imageBaseUrl: 'https://example.invalid/image',
+        videoProviderId: 'seedance',
+        videoModel: 'seedance-v1',
+        videoApiKey: 'video-key',
+        videoBaseUrl: 'https://example.invalid/video',
+      },
+      ttsConfig: {
+        providerId: 'openai-tts',
+        voice: 'alloy',
+        speed: 1.25,
+        apiKey: 'tts-key',
+        baseUrl: 'https://example.invalid/tts',
+      },
+    });
+  });
 });

@@ -2,6 +2,7 @@ import path from 'path';
 import { promises as fs } from 'fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setupIsolatedWorkspace, teardownIsolatedWorkspace } from './test-utils';
+import { normalizeClassroomName } from '@/lib/classroom/name';
 
 vi.mock('@/lib/server/resolve-model', () => ({
   resolveModel: vi.fn(() => ({
@@ -249,6 +250,8 @@ Chloroplast video transcript about ATP conversion.
     expect(persisted?.id).toBe(job?.result?.classroomId);
     expect(persisted?.stage.id).toBe(job?.result?.classroomId);
     expect(persisted?.stage.language).toBe('en-US');
+    expect(persisted?.stage.name).toBe(normalizeClassroomName('Build a chloroplast energy lesson'));
+    expect(persisted?.stage.style).toBe('professional');
     expect(persisted?.stage.generationContext).toMatchObject({
       scopeId: 'scope-classroom-persist',
       knowledgeBaseIds: [knowledgeBase.id],

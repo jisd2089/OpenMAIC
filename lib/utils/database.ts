@@ -1,6 +1,7 @@
 import Dexie, { type EntityTable } from 'dexie';
 import type {
   GenerationContextSummary,
+  PersistedGeneratedAgent,
   Scene,
   SceneContent,
   SceneType,
@@ -54,6 +55,7 @@ export interface StageRecord {
   style?: string;
   currentSceneId?: string;
   agentIds?: string[]; // Agent IDs selected at creation time
+  generatedAgents?: PersistedGeneratedAgent[];
   generationContext?: GenerationContextSummary;
 }
 

@@ -10,12 +10,7 @@ import { SceneSidebar } from './stage/scene-sidebar';
 import { Header } from './header';
 import { CanvasArea } from '@/components/canvas/canvas-area';
 import { Roundtable } from '@/components/roundtable';
-import {
-  PlaybackEngine,
-  computePlaybackView,
-  shouldConsumeDeferredPlayRequest,
-  startPlaybackFromIdle,
-} from '@/lib/playback';
+import { PlaybackEngine, computePlaybackView, getPlaybackEngineSceneKey } from '@/lib/playback';
 import type { EngineMode, TriggerEvent, Effect } from '@/lib/playback';
 import { ActionEngine } from '@/lib/action/engine';
 import { createAudioPlayer } from '@/lib/utils/audio-player';
@@ -69,7 +64,11 @@ export function Stage({
   }, [currentSceneId, regenerationPreviewScenes, showRegenerationPreview]);
   const displayScene = previewScene || currentScene;
   const headerScene = workspaceMode === 'edit' ? currentScene : displayScene;
-  const playbackSceneVersion = workspaceMode === 'present' ? (currentScene?.updatedAt ?? 0) : 0;
+  const playbackEngineSceneKey = getPlaybackEngineSceneKey({
+    workspaceMode,
+    sceneId: currentScene?.id,
+    sceneUpdatedAt: currentScene?.updatedAt,
+  });
 
   // Layout state from settings store (persisted via localStorage)
   const sidebarCollapsed = useSettingsStore((s) => s.sidebarCollapsed);
@@ -156,6 +155,8 @@ export function Stage({
       setAudioIndicatorState(state);
     },
   });
+  const discussionTTSRef = useRef(discussionTTS);
+  discussionTTSRef.current = discussionTTS;
 
   // Pick a student agent for discussion trigger (prioritize student > non-teacher > fallback)
   const pickStudentAgent = useCallback((): string => {
@@ -173,6 +174,8 @@ export function Stage({
     }
     return agents[0]?.id || 'default-1';
   }, [selectedAgentIds]);
+  const pickStudentAgentRef = useRef(pickStudentAgent);
+  pickStudentAgentRef.current = pickStudentAgent;
 
   const engineRef = useRef<PlaybackEngine | null>(null);
   const audioPlayerRef = useRef(createAudioPlayer());
@@ -188,7 +191,6 @@ export function Stage({
   const sceneEpochRef = useRef(0);
   // When true, the next engine init will auto-start playback (for auto-play scene advance)
   const autoStartRef = useRef(false);
-  const pendingPlaySceneIdRef = useRef<string | null>(null);
   // Discussion buffer-level pause state (distinct from soft-pause which aborts SSE)
   const [isDiscussionPaused, setIsDiscussionPaused] = useState(false);
 
@@ -271,25 +273,6 @@ export function Stage({
     await chatAreaRef.current?.endActiveSession();
     doSessionCleanup();
   }, [doSessionCleanup]);
-
-  const triggerIdlePlayback = useCallback(
-    async (engine: PlaybackEngine, wasCompleted: boolean) => {
-      await startPlaybackFromIdle({
-        engine,
-        sceneId: currentScene?.id,
-        wasCompleted,
-        startLecture: async (sceneId, options) => chatAreaRef.current?.startLecture(sceneId, options),
-        setLectureSessionId: (sessionId) => {
-          lectureSessionIdRef.current = sessionId;
-        },
-        resetPlaybackCompleted: () => setPlaybackCompleted(false),
-        resetLectureActionCounter: () => {
-          lectureActionCounterRef.current = 0;
-        },
-      });
-    },
-    [currentScene?.id],
-  );
 
   const clearPresentationIdleTimer = useCallback(() => {
     if (presentationIdleTimerRef.current) {
@@ -404,15 +387,12 @@ export function Stage({
     }
 
     // Stop any in-flight discussion TTS audio on scene switch
-    discussionTTS.cleanup();
+    discussionTTSRef.current.cleanup();
 
     // Reset all roundtable/live state so scenes are fully isolated
     resetSceneState();
 
     if (workspaceMode === 'edit') {
-      if (shouldConsumeDeferredPlayRequest(pendingPlaySceneIdRef.current, currentScene?.id)) {
-        pendingPlaySceneIdRef.current = null;
-      }
       if (engineRef.current) {
         engineRef.current.stop();
         engineRef.current = null;
@@ -428,9 +408,6 @@ export function Stage({
     }
 
     if (!currentScene || !currentScene.actions || currentScene.actions.length === 0) {
-      if (shouldConsumeDeferredPlayRequest(pendingPlaySceneIdRef.current, currentScene?.id)) {
-        pendingPlaySceneIdRef.current = null;
-      }
       engineRef.current = null;
       setEngineMode('idle');
 
@@ -498,7 +475,7 @@ export function Stage({
         if (!trigger.agentId) {
           // Mutate in-place so engine.currentTrigger also gets the agentId
           // (confirmDiscussion reads agentId from the same object reference)
-          trigger.agentId = pickStudentAgent();
+          trigger.agentId = pickStudentAgentRef.current();
         }
         setDiscussionTrigger(trigger);
       },
@@ -517,7 +494,7 @@ export function Stage({
         }
         setDiscussionTrigger(null);
         // Stop any in-flight discussion TTS audio
-        discussionTTS.cleanup();
+        discussionTTSRef.current.cleanup();
         // Clear roundtable state (idempotent — may already be cleared by doSessionCleanup)
         resetLiveState();
         // Only show flash for engine-initiated ends (not manual stop — that's handled by doSessionCleanup)
@@ -592,23 +569,22 @@ export function Stage({
 
     engineRef.current = engine;
 
-    if (shouldConsumeDeferredPlayRequest(pendingPlaySceneIdRef.current, currentScene.id)) {
-      pendingPlaySceneIdRef.current = null;
-      void triggerIdlePlayback(engine, false);
-      return;
-    }
-
     // Auto-start if triggered by auto-play scene advance
     if (autoStartRef.current) {
       autoStartRef.current = false;
       (async () => {
-        await triggerIdlePlayback(engine, true);
+        if (currentScene && chatAreaRef.current) {
+          const sessionId = await chatAreaRef.current.startLecture(currentScene.id);
+          lectureSessionIdRef.current = sessionId;
+          lectureActionCounterRef.current = 0;
+        }
+        engine.start();
       })();
     } else {
       // Load saved playback state and restore position (but never auto-play).
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- Only re-run when scene changes, functions are stable refs
-  }, [currentScene?.id, playbackSceneVersion, discussionTTS, resetSceneState, pickStudentAgent, setWhiteboardOpen, triggerIdlePlayback, workspaceMode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Recreate only when scene identity or workspace mode changes
+  }, [playbackEngineSceneKey, resetSceneState, setWhiteboardOpen]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -754,11 +730,7 @@ export function Stage({
   // play/pause toggle
   const handlePlayPause = useCallback(async () => {
     const engine = engineRef.current;
-    if (!engine) {
-      pendingPlaySceneIdRef.current = currentScene?.id ?? null;
-      return;
-    }
-    pendingPlaySceneIdRef.current = null;
+    if (!engine) return;
 
     const mode = engine.getMode();
     if (mode === 'playing' || mode === 'live') {
@@ -774,9 +746,23 @@ export function Stage({
         chatAreaRef.current?.resumeBuffer(lectureSessionIdRef.current);
       }
     } else {
-      await triggerIdlePlayback(engine, playbackCompleted);
+      const wasCompleted = playbackCompleted;
+      setPlaybackCompleted(false);
+      // Starting playback - create/reuse lecture session
+      if (currentScene && chatAreaRef.current) {
+        const sessionId = await chatAreaRef.current.startLecture(currentScene.id);
+        lectureSessionIdRef.current = sessionId;
+      }
+      if (wasCompleted) {
+        // Restart from beginning (user clicked restart after completion)
+        lectureActionCounterRef.current = 0;
+        engine.start();
+      } else {
+        // Continue from current position (e.g. after discussion end)
+        engine.continuePlayback();
+      }
     }
-  }, [currentScene?.id, playbackCompleted, triggerIdlePlayback]);
+  }, [playbackCompleted, currentScene]);
 
   // get scene information
   const isPendingScene = currentSceneId === PENDING_SCENE_ID;

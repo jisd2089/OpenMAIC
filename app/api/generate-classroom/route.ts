@@ -10,6 +10,54 @@ import { buildRequestOrigin } from '@/lib/server/classroom-storage';
 
 export const maxDuration = 30;
 
+function headerValue(req: NextRequest, key: string): string | undefined {
+  const value = req.headers.get(key)?.trim();
+  return value ? value : undefined;
+}
+
+function headerBoolean(req: NextRequest, key: string): boolean | undefined {
+  const value = headerValue(req, key);
+  if (!value) return undefined;
+  return value === 'true';
+}
+
+function headerNumber(req: NextRequest, key: string): number | undefined {
+  const value = headerValue(req, key);
+  if (!value) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function buildGenerationInput(req: NextRequest, body: GenerateClassroomInput): GenerateClassroomInput {
+  return {
+    ...body,
+    modelConfig: {
+      modelString: headerValue(req, 'x-model'),
+      apiKey: headerValue(req, 'x-api-key'),
+      baseUrl: headerValue(req, 'x-base-url'),
+      providerType: headerValue(req, 'x-provider-type'),
+      requiresApiKey: headerBoolean(req, 'x-requires-api-key'),
+    },
+    mediaConfig: {
+      imageProviderId: headerValue(req, 'x-image-provider'),
+      imageModel: headerValue(req, 'x-image-model'),
+      imageApiKey: headerValue(req, 'x-image-api-key'),
+      imageBaseUrl: headerValue(req, 'x-image-base-url'),
+      videoProviderId: headerValue(req, 'x-video-provider'),
+      videoModel: headerValue(req, 'x-video-model'),
+      videoApiKey: headerValue(req, 'x-video-api-key'),
+      videoBaseUrl: headerValue(req, 'x-video-base-url'),
+    },
+    ttsConfig: {
+      providerId: headerValue(req, 'x-tts-provider'),
+      voice: headerValue(req, 'x-tts-voice'),
+      speed: headerNumber(req, 'x-tts-speed'),
+      apiKey: headerValue(req, 'x-tts-api-key'),
+      baseUrl: headerValue(req, 'x-tts-base-url'),
+    },
+  };
+}
+
 export async function POST(req: NextRequest) {
   try {
     const parsed = await parseJsonRequestWithSchema(req, generateClassroomRequestSchema);
@@ -17,7 +65,7 @@ export async function POST(req: NextRequest) {
       return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, parsed.error);
     }
 
-    const body: GenerateClassroomInput = parsed.data;
+    const body = buildGenerationInput(req, parsed.data);
 
     const baseUrl = buildRequestOrigin(req);
     const jobId = nanoid(10);

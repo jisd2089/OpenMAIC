@@ -16,6 +16,7 @@ import { toast } from 'sonner';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { useStageStore } from '@/lib/store';
 import { ensureClassroomPersisted } from '@/lib/classroom/ensure-classroom-persisted';
+import { prepareCoursePackageAssets } from '@/lib/classroom/prepare-course-package-assets';
 import { createLogger } from '@/lib/logger';
 import type {
   ClassroomRegenerationJobSummary,
@@ -223,6 +224,21 @@ export function ClassroomOpsPanel({ classroomId, onReload }: ClassroomOpsPanelPr
   const exportPackage = useCallback(async () => {
     setBusy('export');
     try {
+      toast.loading(t('classroomOps.preparingClassroomForRework'), {
+        id: 'classroom-ops-persist-before-export',
+      });
+      const preparedScenes = await prepareCoursePackageAssets({
+        classroomId,
+        scenes,
+      });
+      await ensureClassroomPersisted({
+        classroomId,
+        stage,
+        scenes: preparedScenes,
+        operation: 'export',
+      });
+      toast.dismiss('classroom-ops-persist-before-export');
+
       const createRes = await fetch(`/api/classroom/${classroomId}/export`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -262,11 +278,12 @@ export function ClassroomOpsPanel({ classroomId, onReload }: ClassroomOpsPanelPr
       window.location.assign(status.job.result.downloadUrl);
       toast.success(t('classroomOps.exportReady'));
     } catch (error) {
+      toast.dismiss('classroom-ops-persist-before-export');
       toast.error(error instanceof Error ? error.message : t('classroomOps.exportFailed'));
     } finally {
       setBusy(null);
     }
-  }, [classroomId, t]);
+  }, [classroomId, scenes, stage, t]);
 
   const startRegeneration = useCallback(
     async (targetType: 'scene' | 'classroom') => {

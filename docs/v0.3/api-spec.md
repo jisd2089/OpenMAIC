@@ -2,17 +2,18 @@
 
 ## 1. 目标
 
-本文件定义 `v0.3` 需要对外明确的接口契约，覆盖：
+`v0.3` 对外固定以下接口与页面访问约定：
 
-1. 课堂生成
-2. 课堂删除
-3. 教师端 / 学生端课堂页访问约定
-4. 课堂导入、导出文件命名约定
+1. 课堂页教师端 / 学生端视图
+2. 课堂生成任务接口
+3. 课堂列表与课堂详情接口
+4. 课堂删除接口
+5. 课程包导入导出命名规则
 
-默认约定：
+通用约定：
 
-1. 所有 JSON 接口统一返回 `apiSuccess / apiError`
-2. 成功响应格式为：
+1. 所有 JSON 接口统一返回 `success`
+2. 成功响应示例：
 
 ```json
 {
@@ -20,7 +21,7 @@
 }
 ```
 
-3. 失败响应格式为：
+3. 失败响应示例：
 
 ```json
 {
@@ -30,40 +31,45 @@
 }
 ```
 
-4. 时间字段使用 ISO 8601
-5. 标识字段如 `classroomId`、`jobId` 均为字符串
+4. 时间字段统一使用 ISO 8601，前端列表中的时间戳字段使用毫秒数
 
 ## 2. 课堂页访问约定
-
-`v0.3` 需要固定教师端 / 学生端的访问约定。推荐约定如下：
 
 ### 2.1 教师端
 
 `GET /classroom/:id?view=teacher`
 
-说明：
+约束：
 
 1. `view` 缺省时按 `teacher` 处理
-2. 教师端显示完整课堂操作能力
+2. 教师端显示课堂操作面板
+3. 顶部悬浮控制包含：
+   - 教师端
+   - 学生端
+   - 复制学生端链接
+4. 该悬浮控制在课堂页顶部居中显示
 
 ### 2.2 学生端
 
 `GET /classroom/:id?view=student`
 
-说明：
+约束：
 
-1. 学生端不显示“课堂操作”
-2. 学生端保留课堂播放、页面导航、笔记、对话等只读学习体验
+1. 学生端不显示课堂操作面板
+2. 学生端仍保留播放、翻页、笔记、对话等学习能力
+3. 学生端链接固定为：
+
+```text
+/classroom/{id}?view=student
+```
 
 ## 3. 课堂生成接口
-
-`v0.3` 推荐继续兼容当前异步任务模式，但必须保证调用方可以从成功响应中直接获取 `classroomId`。
 
 ### 3.1 创建课堂生成任务
 
 `POST /api/generate-classroom`
 
-请求示例：
+请求体示例：
 
 ```json
 {
@@ -78,6 +84,37 @@
   "preferKnowledgeVideos": false
 }
 ```
+
+可选请求头：
+
+1. 模型配置
+   - `x-model`
+   - `x-api-key`
+   - `x-base-url`
+   - `x-provider-type`
+   - `x-requires-api-key`
+2. 图片生成配置
+   - `x-image-provider`
+   - `x-image-model`
+   - `x-image-api-key`
+   - `x-image-base-url`
+3. 视频生成配置
+   - `x-video-provider`
+   - `x-video-model`
+   - `x-video-api-key`
+   - `x-video-base-url`
+4. TTS 配置
+   - `x-tts-provider`
+   - `x-tts-voice`
+   - `x-tts-speed`
+   - `x-tts-api-key`
+   - `x-tts-base-url`
+
+说明：
+
+1. 这些请求头会被持久化到后台任务
+2. 后台 runner 必须沿用这组配置执行生成
+3. 接口生成效果应与前端生成页保持同一生成策略，而不是退回服务器默认模型
 
 成功响应示例：
 
@@ -94,12 +131,11 @@
 }
 ```
 
-说明：
+约束：
 
-1. 请求体支持 `type` 字段，允许值为 `course` 或 `knowledge`
-2. 若未显式传入 `type`，服务端按 `course` 兼容处理
-3. 创建接口必须返回 `jobId` 和预分配的 `classroomId`
-4. 若采用异步任务模式，任务成功态仍需返回同一个 `classroomId`
+1. `type` 允许 `course | knowledge`
+2. 未传 `type` 时按 `course` 处理
+3. 创建响应必须返回 `jobId` 与预分配的 `classroomId`
 
 ### 3.2 查询课堂生成任务
 
@@ -147,17 +183,78 @@
 
 约束：
 
-1. 创建任务响应中的 `classroomId` 必须存在，且可作为课堂主键稳定使用
-2. 当 `status = succeeded` 时，`result.classroomId` 必须存在
-3. 当 `status = succeeded` 时，`result.classroomId` 必须与创建任务响应中的 `classroomId` 一致
-4. 当 `status = succeeded` 时，`result.url` 必须存在
-5. 调用方不得依赖页面跳转来获取 `classroomId`
+1. 成功态中的 `result.classroomId` 必须与创建响应中的 `classroomId` 一致
+2. `result.url` 返回课堂基础地址，前端展示时应继续按 `?view=teacher|student` 组装最终访问链接
+3. 课堂生成完成后，课堂数据会落到服务端持久化存储，可被首页列表发现
 
-## 4. 课堂删除接口
+## 4. 课堂列表与课堂详情接口
 
-`v0.3` 新增统一的服务端课堂删除接口。
+### 4.1 获取课堂列表
 
-### 4.1 删除课堂
+`GET /api/classroom`
+
+成功响应示例：
+
+```json
+{
+  "success": true,
+  "classrooms": [
+    {
+      "id": "cls_newton_001",
+      "name": "生成一门面向高中生的牛顿第二定律互动课堂",
+      "description": "",
+      "sceneCount": 8,
+      "createdAt": 1775117120342,
+      "updatedAt": 1775116600726,
+      "knowledgeBaseCount": 0,
+      "memoryCount": 0,
+      "preferKnowledgeVideos": false
+    }
+  ]
+}
+```
+
+约束：
+
+1. 返回服务端已持久化的课堂列表
+2. 首页“最近课堂”需要合并：
+   - 本地 IndexedDB 课堂
+   - 该接口返回的服务端课堂
+3. 合并时按 `id` 去重并按 `updatedAt` 倒序排列
+
+### 4.2 获取单个课堂
+
+`GET /api/classroom?id=:id`
+
+成功响应示例：
+
+```json
+{
+  "success": true,
+  "classroom": {
+    "id": "cls_newton_001",
+    "stage": {
+      "id": "cls_newton_001",
+      "name": "生成一门面向高中生的牛顿第二定律互动课堂",
+      "language": "zh-CN",
+      "style": "professional"
+    },
+    "scenes": [],
+    "createdAt": "2026-04-02T08:05:20.342Z"
+  }
+}
+```
+
+约束：
+
+1. `stage.style` 与前端生成页保持一致，固定为 `professional`
+2. `stage.name` 按前端同一标题提取规则生成
+3. 若课堂包含自动生成角色，服务端持久化数据中可包含 `stage.generatedAgents`
+4. 前端打开课堂时需要恢复这些 `generatedAgents`
+
+## 5. 课堂删除接口
+
+### 5.1 删除课堂
 
 `DELETE /api/classroom/:id`
 
@@ -182,73 +279,43 @@
 }
 ```
 
-### 4.2 删除范围
-
-删除课堂时，系统必须删除与该课堂直接关联的服务端资源，包括至少：
+删除范围：
 
 1. `data/classrooms/{id}.json`
-2. `data/classrooms/{id}/` 目录下的课堂媒体和音频资源
-3. `data/classroom-revisions/{id}/` 目录下的快照或修订记录
-4. 与该课堂直接关联的重制预览、草稿或中间结果
+2. `data/classrooms/{id}/`
+3. `data/classroom-revisions/{id}/`
+4. 与该课堂直接关联的导出、重制任务产物
 
-系统不得删除以下共享资源：
+删除后行为：
 
-1. 知识库本体
-2. 记忆本体
-3. 其它课堂的数据目录
+1. `GET /api/classroom?id={id}` 返回不存在
+2. 首页刷新后不再显示该课堂
+3. 前端本地缓存需要同步清理
 
-### 4.3 删除后行为
-
-删除成功后，系统必须满足：
-
-1. `GET /api/classroom/:id` 返回“课堂不存在”
-2. 首页若展示该课堂，刷新后不再显示
-3. 本地缓存若存在该课堂副本，应在前端调用成功后同步清理
-
-## 5. 错误约定
-
-推荐至少覆盖以下错误码：
-
-1. `INVALID_REQUEST`
-2. `CLASSROOM_NOT_FOUND`
-3. `INTERNAL_ERROR`
-4. `GENERATION_FAILED`
-
-## 6. 课堂导入、导出文件命名约定
+## 6. 课程包命名约定
 
 ### 6.1 导出文件名
 
-`v0.3` 要求课堂导出下载文件名统一为：
+标准导出文件名：
 
-`{classroomId}.omaic-course.zip`
+```text
+{classroomId}.omaic-course.zip
+```
 
 示例：
 
-`cls_newton_001.omaic-course.zip`
+```text
+cls_newton_001.omaic-course.zip
+```
 
-约束：
+### 6.2 导入识别规则
 
-1. 文件名主键必须使用 `classroomId`
-2. 不再使用课堂标题、课程名或其它易变展示字段作为导出文件主名
-3. HTTP 下载响应中的 `Content-Disposition.filename` 应与上述规则一致
-
-### 6.2 导入文件名
-
-课堂导入需兼容上述标准命名文件：
-
-`{classroomId}.omaic-course.zip`
-
-说明：
-
-1. 导入接口可接收历史命名文件作为兼容输入
-2. `v0.3` 对外文档、测试样例和标准示例统一使用基于 `classroomId` 的文件名
-3. 导入识别以包内 `manifest` 和 `classroomId` 为准，而不是以课堂标题推断
+1. 导入兼容历史文件名
+2. 标准文档、测试和示例统一使用基于 `classroomId` 的命名
+3. 导入识别以包内 `manifest` 与 `classroomId` 为准，不以课程标题推断
 
 ## 7. 兼容策略
 
-1. 保持现有 `POST /api/generate-classroom` 与 `GET /api/generate-classroom/:jobId` 路径不变
-2. 在不破坏现有异步任务模型的前提下，明确“创建任务响应与成功态都必须返回 `classroomId`”
-3. 新增 `DELETE /api/classroom/:id` 作为统一服务端删除入口
-4. 教师端视图保持现有课堂页默认行为，学生端在同一课堂真值上进行只读化裁剪
-5. 课堂导出下载文件名从课程标题等展示名收敛为 `classroomId`
-6. 课堂导入继续兼容历史文件名，但 `v0.3` 起标准命名以 `classroomId` 为准
+1. 保持 `POST /api/generate-classroom` 与 `GET /api/generate-classroom/:jobId` 路径不变
+2. 保持 `/classroom/{id}` 的教师端默认访问兼容
+3. 新增的 `GET /api/classroom` 列表能力用于补齐服务端课堂在首页中的可见性

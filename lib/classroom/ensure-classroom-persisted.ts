@@ -10,6 +10,11 @@ interface EnsureClassroomPersistedParams {
   stage: Stage | null;
   scenes: Scene[];
   fetchImpl?: FetchLike;
+  operation?: string;
+}
+
+function getDefaultFetch(): FetchLike {
+  return globalThis.fetch.bind(globalThis) as FetchLike;
 }
 
 interface JsonErrorPayload {
@@ -43,7 +48,8 @@ function normalizeScenesForPersist(classroomId: string, scenes: Scene[]): Scene[
 export async function ensureClassroomPersisted(params: EnsureClassroomPersistedParams): Promise<{
   mode: 'updated';
 }> {
-  const fetchImpl = params.fetchImpl ?? fetch;
+  const fetchImpl = params.fetchImpl ?? getDefaultFetch();
+  const operation = params.operation ?? 'save';
   if (!params.stage) {
     throw new Error('Classroom stage is not loaded');
   }
@@ -51,8 +57,9 @@ export async function ensureClassroomPersisted(params: EnsureClassroomPersistedP
   const stage = normalizeStageForPersist(params.classroomId, params.stage);
   const scenes = normalizeScenesForPersist(params.classroomId, params.scenes);
 
-  log.info('Persisting classroom draft before regeneration', {
+  log.info('Persisting classroom draft before operation', {
     classroomId: params.classroomId,
+    operation,
     sceneCount: scenes.length,
   });
 
@@ -67,16 +74,18 @@ export async function ensureClassroomPersisted(params: EnsureClassroomPersistedP
   });
 
   if (patchResponse.ok) {
-    log.info('Classroom draft persisted before regeneration', {
+    log.info('Classroom draft persisted before operation', {
       classroomId: params.classroomId,
+      operation,
       status: patchResponse.status,
     });
     return { mode: 'updated' };
   }
 
   const patchJson = await readJsonSafe(patchResponse);
-  log.error('Failed to persist classroom draft before regeneration', {
+  log.error('Failed to persist classroom draft before operation', {
     classroomId: params.classroomId,
+    operation,
     status: patchResponse.status,
     response: patchJson,
   });

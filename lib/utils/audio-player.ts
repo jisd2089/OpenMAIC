@@ -21,34 +21,6 @@ export class AudioPlayer {
   private volume: number = 1;
   private playbackRate: number = 1;
 
-  private isAudioFinished(audio: HTMLAudioElement): boolean {
-    if (audio.ended) {
-      return true;
-    }
-    return Number.isFinite(audio.duration) && audio.duration > 0 && audio.currentTime >= audio.duration;
-  }
-
-  private getLiveAudio(): HTMLAudioElement | null {
-    if (!this.audio) {
-      return null;
-    }
-    if (this.isAudioFinished(this.audio)) {
-      this.audio = null;
-      return null;
-    }
-    return this.audio;
-  }
-
-  private bindEndedHandler(audio: HTMLAudioElement, onEnded?: () => void): void {
-    audio.addEventListener('ended', () => {
-      if (this.audio === audio) {
-        this.audio = null;
-      }
-      onEnded?.();
-      this.onEndedCallback?.();
-    });
-  }
-
   /**
    * Play audio (from URL or IndexedDB pre-generated cache)
    * @param audioId Audio ID
@@ -60,16 +32,17 @@ export class AudioPlayer {
       // 1. Try audioUrl first (server-generated TTS)
       if (audioUrl) {
         this.stop();
-        const audio = new Audio();
-        this.audio = audio;
-        audio.src = audioUrl;
-        if (this.muted) audio.volume = 0;
-        else audio.volume = this.volume;
-        audio.defaultPlaybackRate = this.playbackRate;
-        audio.playbackRate = this.playbackRate;
-        this.bindEndedHandler(audio);
-        await audio.play();
-        audio.playbackRate = this.playbackRate;
+        this.audio = new Audio();
+        this.audio.src = audioUrl;
+        if (this.muted) this.audio.volume = 0;
+        else this.audio.volume = this.volume;
+        this.audio.defaultPlaybackRate = this.playbackRate;
+        this.audio.playbackRate = this.playbackRate;
+        this.audio.addEventListener('ended', () => {
+          this.onEndedCallback?.();
+        });
+        await this.audio.play();
+        this.audio.playbackRate = this.playbackRate;
         return true;
       }
 
@@ -85,28 +58,28 @@ export class AudioPlayer {
       this.stop();
 
       // Create audio element
-      const audio = new Audio();
-      this.audio = audio;
+      this.audio = new Audio();
 
       // Set audio source
       const blobUrl = URL.createObjectURL(audioRecord.blob);
-      audio.src = blobUrl;
-      if (this.muted) audio.volume = 0;
-      else audio.volume = this.volume;
+      this.audio.src = blobUrl;
+      if (this.muted) this.audio.volume = 0;
+      else this.audio.volume = this.volume;
 
       // Apply playback rate
-      audio.defaultPlaybackRate = this.playbackRate;
-      audio.playbackRate = this.playbackRate;
+      this.audio.defaultPlaybackRate = this.playbackRate;
+      this.audio.playbackRate = this.playbackRate;
 
       // Set ended callback
-      this.bindEndedHandler(audio, () => {
+      this.audio.addEventListener('ended', () => {
         URL.revokeObjectURL(blobUrl);
+        this.onEndedCallback?.();
       });
 
       // Play
-      await audio.play();
+      await this.audio.play();
       // Re-apply after play() — some browsers reset during load
-      audio.playbackRate = this.playbackRate;
+      this.audio.playbackRate = this.playbackRate;
       return true;
     } catch (error) {
       log.error('Failed to play audio:', error);
@@ -118,9 +91,8 @@ export class AudioPlayer {
    * Pause playback
    */
   public pause(): void {
-    const audio = this.getLiveAudio();
-    if (audio && !audio.paused) {
-      audio.pause();
+    if (this.audio && !this.audio.paused) {
+      this.audio.pause();
     }
   }
 
@@ -141,32 +113,20 @@ export class AudioPlayer {
   /**
    * Resume playback
    */
-  public resume(): boolean {
-    const audio = this.getLiveAudio();
-    if (!audio) {
-      return false;
+  public resume(): void {
+    if (this.audio?.paused) {
+      this.audio.playbackRate = this.playbackRate;
+      this.audio.play().catch((error) => {
+        log.error('Failed to resume audio:', error);
+      });
     }
-    if (!audio.paused) {
-      return true;
-    }
-
-    audio.playbackRate = this.playbackRate;
-    audio.play().catch((error) => {
-      if (this.audio === audio) {
-        this.audio = null;
-      }
-      this.onEndedCallback?.();
-      log.error('Failed to resume audio:', error);
-    });
-    return true;
   }
 
   /**
    * Get current playback status (actively playing, not paused)
    */
   public isPlaying(): boolean {
-    const audio = this.getLiveAudio();
-    return audio !== null && !audio.paused;
+    return this.audio !== null && !this.audio.paused;
   }
 
   /**
@@ -174,23 +134,21 @@ export class AudioPlayer {
    * Used to decide whether to resume playback or skip to the next line
    */
   public hasActiveAudio(): boolean {
-    return this.getLiveAudio() !== null;
+    return this.audio !== null;
   }
 
   /**
    * Get current playback time (milliseconds)
    */
   public getCurrentTime(): number {
-    const audio = this.getLiveAudio();
-    return audio ? audio.currentTime * 1000 : 0;
+    return this.audio ? this.audio.currentTime * 1000 : 0;
   }
 
   /**
    * Get audio duration (milliseconds)
    */
   public getDuration(): number {
-    const audio = this.getLiveAudio();
-    return audio && !isNaN(audio.duration) ? audio.duration * 1000 : 0;
+    return this.audio && !isNaN(this.audio.duration) ? this.audio.duration * 1000 : 0;
   }
 
   /**
@@ -205,9 +163,8 @@ export class AudioPlayer {
    */
   public setMuted(muted: boolean): void {
     this.muted = muted;
-    const audio = this.getLiveAudio();
-    if (audio) {
-      audio.volume = muted ? 0 : this.volume;
+    if (this.audio) {
+      this.audio.volume = muted ? 0 : this.volume;
     }
   }
 
@@ -216,9 +173,8 @@ export class AudioPlayer {
    */
   public setVolume(volume: number): void {
     this.volume = Math.max(0, Math.min(1, volume));
-    const audio = this.getLiveAudio();
-    if (audio && !this.muted) {
-      audio.volume = this.volume;
+    if (this.audio && !this.muted) {
+      this.audio.volume = this.volume;
     }
   }
 
@@ -227,9 +183,8 @@ export class AudioPlayer {
    */
   public setPlaybackRate(rate: number): void {
     this.playbackRate = Math.max(0.5, Math.min(2, rate));
-    const audio = this.getLiveAudio();
-    if (audio) {
-      audio.playbackRate = this.playbackRate;
+    if (this.audio) {
+      this.audio.playbackRate = this.playbackRate;
     }
   }
 

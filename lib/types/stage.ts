@@ -39,6 +39,20 @@ export interface SceneGenerationContext {
   knowledgeVideoReferences?: KnowledgeVideoReference[];
 }
 
+export interface PersistedGeneratedAgent {
+  id: string;
+  name: string;
+  role: string;
+  persona: string;
+  avatar: string;
+  color: string;
+  priority: number;
+  voiceConfig?: {
+    providerId: string;
+    voiceId: string;
+  };
+}
+
 /**
  * Stage - Represents the entire classroom/course
  */
@@ -56,6 +70,7 @@ export interface Stage {
   whiteboard?: Whiteboard[];
   // Agent IDs selected when this classroom was created
   agentIds?: string[];
+  generatedAgents?: PersistedGeneratedAgent[];
   editable?: boolean;
   isDraft?: boolean;
   revisionId?: string;

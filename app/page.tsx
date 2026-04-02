@@ -91,6 +91,8 @@ interface CourseImportStatus {
   warnings?: string[];
 }
 
+type ClassroomListItem = StageListItem;
+
 const initialFormState: FormState = {
   pdfFile: null,
   requirement: '',
@@ -171,7 +173,7 @@ function HomePage() {
   const [themeOpen, setThemeOpen] = useState(false);
   const [retrievalPanelOpen, setRetrievalPanelOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [classrooms, setClassrooms] = useState<StageListItem[]>([]);
+  const [classrooms, setClassrooms] = useState<ClassroomListItem[]>([]);
   const [thumbnails, setThumbnails] = useState<Record<string, Slide>>({});
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [knowledgeBaseOptions, setKnowledgeBaseOptions] = useState<KnowledgeBaseSummary[]>([]);
@@ -242,12 +244,39 @@ function HomePage() {
 
   const loadClassrooms = async () => {
     try {
-      const list = await listStages();
+      const [localList, serverResponse] = await Promise.all([
+        listStages(),
+        fetch('/api/classroom', { cache: 'no-store' }).catch(() => null),
+      ]);
+
+      const serverPayload = serverResponse
+        ? ((await serverResponse.json().catch(() => null)) as
+            | { success?: boolean; classrooms?: ClassroomListItem[] }
+            | null)
+        : null;
+      const serverList =
+        serverResponse?.ok && serverPayload?.success && Array.isArray(serverPayload.classrooms)
+          ? serverPayload.classrooms
+          : [];
+
+      const merged = new Map<string, ClassroomListItem>();
+      for (const item of serverList) {
+        merged.set(item.id, item);
+      }
+      for (const item of localList) {
+        merged.set(item.id, item);
+      }
+      const list = Array.from(merged.values()).sort((a, b) => b.updatedAt - a.updatedAt);
       setClassrooms(list);
       // Load first slide thumbnails
       if (list.length > 0) {
-        const slides = await getFirstSlideByStages(list.map((c) => c.id));
+        const localIds = new Set(localList.map((item) => item.id));
+        const slides = await getFirstSlideByStages(
+          list.filter((item) => localIds.has(item.id)).map((c) => c.id),
+        );
         setThumbnails(slides);
+      } else {
+        setThumbnails({});
       }
     } catch (err) {
       log.error('Failed to load classrooms:', err);

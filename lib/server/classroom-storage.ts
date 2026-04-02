@@ -66,6 +66,18 @@ export interface PersistedClassroomData {
   createdAt: string;
 }
 
+export interface PersistedClassroomListItem {
+  id: string;
+  name: string;
+  description?: string;
+  sceneCount: number;
+  createdAt: number;
+  updatedAt: number;
+  knowledgeBaseCount?: number;
+  memoryCount?: number;
+  preferKnowledgeVideos?: boolean;
+}
+
 export function isValidClassroomId(id: string): boolean {
   return /^[a-zA-Z0-9_-]+$/.test(id);
 }
@@ -104,6 +116,44 @@ export async function readClassroom(id: string): Promise<PersistedClassroomData 
     }
     throw error;
   }
+}
+
+export async function listPersistedClassrooms(): Promise<PersistedClassroomListItem[]> {
+  await ensureClassroomsDir();
+  const entries = await fs.readdir(CLASSROOMS_DIR, { withFileTypes: true });
+  const items = await Promise.all(
+    entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+      .map(async (entry) => {
+        try {
+          const content = await fs.readFile(path.join(CLASSROOMS_DIR, entry.name), 'utf-8');
+          const classroom = JSON.parse(content) as PersistedClassroomData;
+          return {
+            id: classroom.id,
+            name: classroom.stage.name || 'Untitled Stage',
+            description: classroom.stage.description,
+            sceneCount: classroom.scenes.length,
+            createdAt: new Date(classroom.createdAt).getTime(),
+            updatedAt: classroom.stage.updatedAt || new Date(classroom.createdAt).getTime(),
+            knowledgeBaseCount: classroom.stage.generationContext?.knowledgeBaseIds?.length,
+            memoryCount: classroom.stage.generationContext?.memoryIds?.length,
+            preferKnowledgeVideos:
+              classroom.stage.generationContext?.preferKnowledgeVideos ?? false,
+          } satisfies PersistedClassroomListItem;
+        } catch {
+          return null;
+        }
+      }),
+  );
+
+  const classrooms = items.reduce<PersistedClassroomListItem[]>((acc, item) => {
+    if (item) {
+      acc.push(item);
+    }
+    return acc;
+  }, []);
+  classrooms.sort((a, b) => b.updatedAt - a.updatedAt);
+  return classrooms;
 }
 
 export async function persistClassroom(

@@ -1,35 +1,28 @@
 # OpenMAIC v0.3 文档索引
 
-## 1. 当前文档
+## 1. 文档列表
 
 1. [requirements.md](./requirements.md)
 2. [api-spec.md](./api-spec.md)
 3. [detailed-design.md](./detailed-design.md)
-4. [task-breakdown.md](./task-breakdown.md)
-5. [implementation-test-deploy.md](./implementation-test-deploy.md)
+4. [implementation-test-deploy.md](./implementation-test-deploy.md)
+5. [task-breakdown.md](./task-breakdown.md)
+6. [bugfix.md](./bugfix.md)
 
-## 2. 建议阅读顺序
+## 2. 当前范围
 
-1. 先读 [requirements.md](./requirements.md)
-2. 再读 [api-spec.md](./api-spec.md)
-3. 再读 [detailed-design.md](./detailed-design.md)
-4. 再读 [task-breakdown.md](./task-breakdown.md)
-5. 最后读 [implementation-test-deploy.md](./implementation-test-deploy.md)
+`v0.3` 当前聚焦：
 
-## 3. 版本范围
+1. 教师端 / 学生端课堂视图
+2. 课堂生成接口、课堂列表接口与课堂删除接口
+3. 首页展示服务端课堂
+4. 课程包导入导出命名收口
+5. 课堂播放、导出等问题修复记录
 
-`v0.3` 当前聚焦三项能力：
+## 3. 当前实现口径
 
-1. 课堂页区分教师端和学生端
-2. 提供课堂生成与课堂删除 API 及配套文档
-3. 统一课堂导入、导出文件名为 `classroomId`
-
-## 4. 说明
-
-本版本默认延续 `v0.2` 已有课堂播放、笔记、对话、版本快照、导入导出和重制能力。
-
-`v0.3` 的新增点主要是：
-
-1. 将课堂页抽象为两种访问视图
-2. 将课堂生成和课堂删除沉淀为稳定、可对接的接口契约
-3. 统一课堂导入、导出文件包命名规则，避免名称漂移
+1. `/classroom/{id}?view=teacher|student` 为正式访问约定
+2. `POST /api/generate-classroom` 创建任务后返回 `classroomId`
+3. `GET /api/classroom` 返回服务端课堂列表
+4. 首页“最近课堂”合并显示本地课堂与服务端课堂
+5. 通过接口或 `curl` 创建并完成的课堂，刷新首页后应可见并可进入

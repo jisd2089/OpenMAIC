@@ -35,8 +35,50 @@ import type {
   SelectedMemorySummary,
   Stage,
 } from '@/lib/types/stage';
+import { extractGenerationTitle } from '@/lib/classroom/generation-title';
 
 const log = createLogger('Classroom');
+
+export interface ClassroomModelConfig {
+  modelString?: string;
+  apiKey?: string;
+  baseUrl?: string;
+  providerType?: string;
+  requiresApiKey?: boolean;
+}
+
+export interface ClassroomMediaConfig {
+  imageProviderId?: string;
+  imageModel?: string;
+  imageApiKey?: string;
+  imageBaseUrl?: string;
+  videoProviderId?: string;
+  videoModel?: string;
+  videoApiKey?: string;
+  videoBaseUrl?: string;
+}
+
+export interface ClassroomTTSConfig {
+  providerId?: string;
+  voice?: string;
+  speed?: number;
+  apiKey?: string;
+  baseUrl?: string;
+}
+
+export interface GeneratedClassroomAgent {
+  id: string;
+  name: string;
+  role: string;
+  persona: string;
+  avatar: string;
+  color: string;
+  priority: number;
+  voiceConfig?: {
+    providerId: string;
+    voiceId: string;
+  };
+}
 
 export interface GenerateClassroomInput {
   type: 'course' | 'knowledge';
@@ -56,6 +98,9 @@ export interface GenerateClassroomInput {
   selectedKnowledgeBases?: SelectedKnowledgeBaseSummary[];
   selectedMemories?: SelectedMemorySummary[];
   agentMode?: 'preset' | 'auto' | 'default' | 'generate';
+  modelConfig?: ClassroomModelConfig;
+  mediaConfig?: ClassroomMediaConfig;
+  ttsConfig?: ClassroomTTSConfig;
 }
 
 export type ClassroomGenerationStep =
@@ -128,11 +173,41 @@ function stripCodeFences(text: string): string {
   return cleaned.trim();
 }
 
+const GENERATED_AGENT_AVATARS = [
+  '/avatars/teacher.png',
+  '/avatars/teacher-2.png',
+  '/avatars/assist.png',
+  '/avatars/assist-2.png',
+  '/avatars/clown.png',
+  '/avatars/clown-2.png',
+  '/avatars/curious.png',
+  '/avatars/curious-2.png',
+  '/avatars/note-taker.png',
+  '/avatars/note-taker-2.png',
+  '/avatars/thinker.png',
+  '/avatars/thinker-2.png',
+];
+
+const GENERATED_AGENT_COLORS = [
+  '#3b82f6',
+  '#10b981',
+  '#f59e0b',
+  '#ec4899',
+  '#06b6d4',
+  '#8b5cf6',
+  '#f97316',
+  '#14b8a6',
+  '#e11d48',
+  '#6366f1',
+  '#84cc16',
+  '#a855f7',
+];
+
 async function generateAgentProfiles(
   requirement: string,
   language: string,
   aiCall: AICallFn,
-): Promise<AgentInfo[]> {
+): Promise<GeneratedClassroomAgent[]> {
   const systemPrompt =
     'You are an expert instructional designer. Generate agent profiles for a multi-agent classroom simulation. Return ONLY valid JSON, no markdown or explanation.';
 
@@ -144,6 +219,9 @@ Requirements:
 - Exactly 1 agent must have role "teacher", the rest can be "assistant" or "student"
 - Each agent needs: name, role, persona (2-3 sentences describing personality and teaching/learning style)
 - Names and personas must be in language: ${language}
+- Each agent must use a distinct avatar from this list: ${JSON.stringify(GENERATED_AGENT_AVATARS)}
+- Each agent must use a distinct color from this list: ${JSON.stringify(GENERATED_AGENT_COLORS)}
+- Priority values: teacher=10, assistant=7, student=4-6
 
 Return a JSON object with this exact structure:
 {
@@ -151,7 +229,10 @@ Return a JSON object with this exact structure:
     {
       "name": "string",
       "role": "teacher" | "assistant" | "student",
-      "persona": "string (2-3 sentences)"
+      "persona": "string (2-3 sentences)",
+      "avatar": "string",
+      "color": "string",
+      "priority": number
     }
   ]
 }`;
@@ -159,7 +240,14 @@ Return a JSON object with this exact structure:
   const response = await aiCall(systemPrompt, userPrompt);
   const rawText = stripCodeFences(response);
   const parsed = JSON.parse(rawText) as {
-    agents: Array<{ name: string; role: string; persona: string }>;
+    agents: Array<{
+      name: string;
+      role: string;
+      persona: string;
+      avatar?: string;
+      color?: string;
+      priority?: number;
+    }>;
   };
 
   if (!parsed.agents || !Array.isArray(parsed.agents) || parsed.agents.length < 2) {
@@ -176,6 +264,9 @@ Return a JSON object with this exact structure:
     name: a.name,
     role: a.role,
     persona: a.persona,
+    avatar: a.avatar || GENERATED_AGENT_AVATARS[i % GENERATED_AGENT_AVATARS.length],
+    color: a.color || GENERATED_AGENT_COLORS[i % GENERATED_AGENT_COLORS.length],
+    priority: a.priority ?? (a.role === 'teacher' ? 10 : a.role === 'assistant' ? 7 : 5),
   }));
 }
 
@@ -197,8 +288,8 @@ export async function generateClassroom(
     scenesGenerated: 0,
   });
 
-  const { model: languageModel, modelInfo, modelString } = resolveModel({});
-  log.info(`Using server-configured model: ${modelString}`);
+  const { model: languageModel, modelInfo, modelString } = resolveModel(input.modelConfig || {});
+  log.info(`Using classroom generation model: ${modelString}`);
 
   // Fail fast if the resolved provider has no API key configured
   const { providerId } = parseModelString(modelString);
@@ -234,11 +325,13 @@ export async function generateClassroom(
 
   // Resolve agents based on agentMode
   let agents: AgentInfo[];
+  let generatedAgents: GeneratedClassroomAgent[] | undefined;
   if (shouldGenerateAgents(input.agentMode)) {
     log.info('Generating custom agent profiles via LLM...');
     try {
-      agents = await generateAgentProfiles(requirement, lang, aiCall);
-      log.info(`Generated ${agents.length} agent profiles`);
+      generatedAgents = await generateAgentProfiles(requirement, lang, aiCall);
+      agents = generatedAgents;
+      log.info(`Generated ${generatedAgents.length} agent profiles`);
     } catch (e) {
       log.warn('Agent profile generation failed, falling back to defaults:', e);
       agents = getDefaultAgents();
@@ -330,10 +423,10 @@ export async function generateClassroom(
   const classroomId = options.classroomId;
   const stage: Stage = {
     id: classroomId,
-    name: outlines[0]?.title || requirement.slice(0, 50),
+    name: extractGenerationTitle(requirement),
     description: undefined,
     language: lang,
-    style: 'interactive',
+    style: 'professional',
     generationContext:
       input.knowledgeBaseIds?.length || input.memoryIds?.length
         ? {
@@ -347,6 +440,8 @@ export async function generateClassroom(
             preferKnowledgeVideos: input.preferKnowledgeVideos,
           }
         : undefined,
+    agentIds: generatedAgents?.map((agent) => agent.id) || agents.map((agent) => agent.id),
+    generatedAgents,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -470,7 +565,9 @@ export async function generateClassroom(
     });
 
     try {
-      const mediaMap = await generateMediaForClassroom(outlines, classroomId, options.baseUrl);
+      const mediaMap = await generateMediaForClassroom(outlines, classroomId, options.baseUrl, {
+        config: input.mediaConfig,
+      });
       replaceMediaPlaceholders(scenes, mediaMap);
       log.info(`Media generation complete: ${Object.keys(mediaMap).length} files`);
     } catch (err) {
@@ -489,7 +586,9 @@ export async function generateClassroom(
     });
 
     try {
-      await generateTTSForClassroom(scenes, classroomId, options.baseUrl);
+      await generateTTSForClassroom(scenes, classroomId, options.baseUrl, {
+        config: input.ttsConfig,
+      });
       log.info('TTS generation complete');
     } catch (err) {
       log.warn('TTS generation phase failed, continuing:', err);

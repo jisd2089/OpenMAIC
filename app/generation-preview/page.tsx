@@ -35,6 +35,7 @@ import {
   parseGenerationSessionStorage,
 } from '@/lib/generation/session-storage';
 import { StepVisualizer } from './components/visualizers';
+import { extractGenerationTitle } from '@/lib/classroom/generation-title';
 
 const log = createLogger('GenerationPreview');
 
@@ -367,28 +368,28 @@ function GenerationPreviewContent() {
 
       // Create stage client-side (needed for agent generation stageId)
       const stageId = nanoid(10);
-        const stage: Stage = {
-          id: stageId,
-          name: extractTopicFromRequirement(currentSession.requirements.requirement),
-          description: '',
-          language: currentSession.requirements.language || 'zh-CN',
-          style: 'professional',
-          generationContext:
-            currentSession.knowledgeBaseIds?.length || currentSession.memoryIds?.length
-              ? {
-                  scopeId: currentSession.scopeId,
-                  knowledgeBaseIds: currentSession.knowledgeBaseIds,
-                  memoryIds: currentSession.memoryIds,
-                  selectedKnowledgeBases: currentSession.selectedKnowledgeBases,
-                  selectedMemories: currentSession.selectedMemories,
-                  enableKnowledgeRetrieval: currentSession.enableKnowledgeRetrieval,
-                  enableMemoryRetrieval: currentSession.enableMemoryRetrieval,
-                  preferKnowledgeVideos: currentSession.preferKnowledgeVideos,
-                }
-              : undefined,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        };
+      const stage: Stage = {
+        id: stageId,
+        name: extractGenerationTitle(currentSession.requirements.requirement),
+        description: '',
+        language: currentSession.requirements.language || 'zh-CN',
+        style: 'professional',
+        generationContext:
+          currentSession.knowledgeBaseIds?.length || currentSession.memoryIds?.length
+            ? {
+                scopeId: currentSession.scopeId,
+                knowledgeBaseIds: currentSession.knowledgeBaseIds,
+                memoryIds: currentSession.memoryIds,
+                selectedKnowledgeBases: currentSession.selectedKnowledgeBases,
+                selectedMemories: currentSession.selectedMemories,
+                enableKnowledgeRetrieval: currentSession.enableKnowledgeRetrieval,
+                enableMemoryRetrieval: currentSession.enableMemoryRetrieval,
+                preferKnowledgeVideos: currentSession.preferKnowledgeVideos,
+              }
+            : undefined,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
 
       if (settings.agentMode === 'auto') {
         const agentStepIdx = activeSteps.findIndex((s) => s.id === 'agent-generation');
@@ -847,14 +848,6 @@ function GenerationPreviewContent() {
       sessionStorage.removeItem('generationSession');
       setError(err instanceof Error ? err.message : String(err));
     }
-  };
-
-  const extractTopicFromRequirement = (requirement: string): string => {
-    const trimmed = requirement.trim();
-    if (trimmed.length <= 500) {
-      return trimmed;
-    }
-    return trimmed.substring(0, 500).trim() + '...';
   };
 
   const goBackToHome = () => {

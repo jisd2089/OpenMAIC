@@ -8,6 +8,7 @@ import type { Scene, Stage } from '@/lib/types/stage';
 import {
   buildRequestOrigin,
   isValidClassroomId,
+  listPersistedClassrooms,
   persistClassroom,
   readClassroom,
 } from '@/lib/server/classroom-storage';
@@ -60,11 +61,8 @@ export async function GET(request: NextRequest) {
     const id = request.nextUrl.searchParams.get('id');
 
     if (!id) {
-      return apiError(
-        API_ERROR_CODES.MISSING_REQUIRED_FIELD,
-        400,
-        'Missing required parameter: id',
-      );
+      const classrooms = await listPersistedClassrooms();
+      return apiSuccess({ classrooms });
     }
 
     if (!isValidClassroomId(id)) {

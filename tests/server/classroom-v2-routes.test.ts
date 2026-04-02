@@ -120,6 +120,45 @@ describe('classroom patch, revision, and regeneration routes', () => {
     await teardownIsolatedWorkspace(workspaceRoot);
   });
 
+  it('lists persisted classrooms via GET /api/classroom', async () => {
+    const classroomCollectionRoute = await import('@/app/api/classroom/route');
+    const { persistClassroom } = await import('@/lib/server/classroom-storage');
+
+    await persistClassroom(
+      {
+        id: 'listed_course',
+        stage: {
+          ...buildStage('listed_course'),
+          name: 'Listed Course',
+          generationContext: {
+            knowledgeBaseIds: ['kb_1'],
+            memoryIds: ['mem_1', 'mem_2'],
+            preferKnowledgeVideos: true,
+          },
+        },
+        scenes: buildScenes('listed_course'),
+      },
+      'http://localhost',
+    );
+
+    const response = await classroomCollectionRoute.GET(createGetRequest('http://localhost/api/classroom'));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.success).toBe(true);
+    expect(body.classrooms).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'listed_course',
+          name: 'Listed Course',
+          sceneCount: 1,
+          knowledgeBaseCount: 1,
+          memoryCount: 2,
+          preferKnowledgeVideos: true,
+        }),
+      ]),
+    );
+  });
+
   it('creates a draft classroom when PATCH saves a local-only classroom for the first time', async () => {
     const classroomRoute = await import('@/app/api/classroom/[id]/route');
     const { readClassroom } = await import('@/lib/server/classroom-storage');

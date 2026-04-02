@@ -18,11 +18,16 @@ export async function teardownIsolatedWorkspace(root: string): Promise<void> {
   await fs.rm(root, { recursive: true, force: true }).catch(() => undefined);
 }
 
-export function createJsonRequest(url: string, method: string, body: unknown): NextRequest {
+export function createJsonRequest(
+  url: string,
+  method: string,
+  body: unknown,
+  headers?: Record<string, string>,
+): NextRequest {
   return new NextRequest(
     new Request(url, {
       method,
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...(headers || {}) },
       body: JSON.stringify(body),
     }),
   );

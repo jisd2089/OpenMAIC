@@ -172,9 +172,15 @@ export default function ClassroomDetailPage() {
       // Restore completed media generation tasks from IndexedDB
       await useMediaGenerationStore.getState().restoreFromDB(classroomId);
       // Restore agents for this stage
-      const { loadGeneratedAgentsForStage, useAgentRegistry } =
+      const { loadGeneratedAgentsForStage, saveGeneratedAgents, useAgentRegistry } =
         await import('@/lib/orchestration/registry/store');
-      const generatedAgentIds = await loadGeneratedAgentsForStage(classroomId);
+      let generatedAgentIds = await loadGeneratedAgentsForStage(classroomId);
+      if (generatedAgentIds.length === 0) {
+        const stage = useStageStore.getState().stage;
+        if (stage?.generatedAgents?.length) {
+          generatedAgentIds = await saveGeneratedAgents(classroomId, stage.generatedAgents);
+        }
+      }
       const { useSettingsStore } = await import('@/lib/store/settings');
       if (generatedAgentIds.length > 0) {
         // Auto mode: use generated agents from IndexedDB
@@ -350,7 +356,7 @@ export default function ClassroomDetailPage() {
     <ThemeProvider>
       <MediaStageProvider value={classroomId}>
         <div className="relative h-screen flex flex-col overflow-hidden">
-          <div className="absolute top-4 left-4 z-40">
+          <div className="absolute top-4 left-1/2 z-40 -translate-x-1/2">
             <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/70 bg-white/85 px-3 py-2 shadow-lg backdrop-blur dark:border-slate-700/70 dark:bg-slate-900/85">
               <button
                 onClick={() => handleSwitchView('teacher')}

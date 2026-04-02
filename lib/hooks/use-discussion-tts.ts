@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useSettingsStore } from '@/lib/store/settings';
 import { useBrowserTTS } from '@/lib/hooks/use-browser-tts';
 import { resolveAgentVoice, getAvailableProvidersWithVoices } from '@/lib/audio/voice-resolver';
@@ -293,11 +293,14 @@ export function useDiscussionTTS({ enabled, agents, onAudioStateChange }: Discus
     };
   }, []);
 
-  return {
-    handleSegmentSealed,
-    cleanup,
-    pause,
-    resume,
-    shouldHold,
-  };
+  return useMemo(
+    () => ({
+      handleSegmentSealed,
+      cleanup,
+      pause,
+      resume,
+      shouldHold,
+    }),
+    [handleSegmentSealed, cleanup, pause, resume, shouldHold],
+  );
 }
