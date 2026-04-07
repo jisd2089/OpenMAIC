@@ -24,6 +24,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/packages ./packages
 COPY . .
 
+RUN pnpm --filter mathml2omml build && pnpm --filter pptxgenjs build
 RUN pnpm build
 
 # ---- Stage 4: Runner ----
@@ -35,6 +36,7 @@ ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
 
+RUN apk add --no-cache docker-cli
 RUN mkdir -p /app/data
 
 COPY --from=builder /app/public ./public

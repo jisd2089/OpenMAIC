@@ -1,0 +1,22 @@
+{
+  "id": "OaVdrITIiMWXa5kC",
+  "classroomId": "code_course",
+  "sceneId": "scene_1",
+  "clientSessionId": "tab_js",
+  "view": "teacher",
+  "providerMode": "local",
+  "sandboxId": "sandbox_OaVdrITIiMWXa5kC",
+  "language": "javascript",
+  "entrypoint": "index.js",
+  "stdin": "",
+  "files": [
+    {
+      "path": "index.js",
+      "content": "console.log('hello code classroom');\n"
+    }
+  ],
+  "status": "ready",
+  "lastExecutionId": "5c635d72-b4f0-466a-95fb-94611bf21f11",
+  "createdAt": "2026-04-02T12:16:10.156Z",
+  "updatedAt": "2026-04-02T12:17:07.224Z"
+}

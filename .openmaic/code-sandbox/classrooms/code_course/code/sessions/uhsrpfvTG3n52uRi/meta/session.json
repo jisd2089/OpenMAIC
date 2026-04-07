@@ -1,0 +1,22 @@
+{
+  "id": "uhsrpfvTG3n52uRi",
+  "classroomId": "code_course",
+  "sceneId": "scene_1",
+  "clientSessionId": "tab_html",
+  "view": "teacher",
+  "providerMode": "local",
+  "sandboxId": "sandbox_uhsrpfvTG3n52uRi",
+  "language": "html",
+  "entrypoint": "index.html",
+  "stdin": "",
+  "files": [
+    {
+      "path": "index.html",
+      "content": "<!doctype html><html><body><main>Hello HTML Preview</main></body></html>"
+    }
+  ],
+  "status": "running",
+  "lastExecutionId": null,
+  "createdAt": "2026-04-02T12:16:44.626Z",
+  "updatedAt": "2026-04-02T12:17:07.225Z"
+}

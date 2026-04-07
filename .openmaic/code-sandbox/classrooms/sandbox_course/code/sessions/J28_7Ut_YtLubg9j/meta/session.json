@@ -1,0 +1,22 @@
+{
+  "id": "J28_7Ut_YtLubg9j",
+  "classroomId": "sandbox_course",
+  "sceneId": "scene_1",
+  "clientSessionId": "runtime_list_tab",
+  "view": "teacher",
+  "providerMode": "local",
+  "sandboxId": "sandbox_J28_7Ut_YtLubg9j",
+  "language": "javascript",
+  "entrypoint": "index.js",
+  "stdin": "",
+  "files": [
+    {
+      "path": "index.js",
+      "content": "console.log('Hello from OpenMAIC');\n"
+    }
+  ],
+  "status": "ready",
+  "lastExecutionId": null,
+  "createdAt": "2026-04-02T12:16:27.994Z",
+  "updatedAt": "2026-04-02T12:16:27.994Z"
+}

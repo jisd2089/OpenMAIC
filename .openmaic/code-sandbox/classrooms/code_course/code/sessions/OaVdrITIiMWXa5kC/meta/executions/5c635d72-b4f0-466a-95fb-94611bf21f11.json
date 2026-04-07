@@ -1,0 +1,17 @@
+{
+  "id": "5c635d72-b4f0-466a-95fb-94611bf21f11",
+  "classroomId": "code_course",
+  "sessionId": "OaVdrITIiMWXa5kC",
+  "language": "javascript",
+  "entrypoint": "index.js",
+  "status": "running",
+  "exitCode": null,
+  "stdout": "",
+  "stderr": "",
+  "previewMode": "terminal",
+  "previewUrl": null,
+  "previewToken": null,
+  "artifacts": [],
+  "startedAt": "2026-04-02T12:17:07.227Z",
+  "finishedAt": null
+}

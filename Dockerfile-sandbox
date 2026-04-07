@@ -1,0 +1,60 @@
+ARG BASE_IMAGE=enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+
+FROM swift:6.2.4-jammy AS swift-toolchain
+
+FROM ${BASE_IMAGE}
+
+USER root
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# First-pass extended language toolchain for OpenMAIC AIO sandbox.
+# This image intentionally covers the languages that match the current
+# OpenMAIC runtime contract without extra executor changes:
+# TypeScript, Java, Go, Rust, PHP, Ruby, Kotlin, Scala, C#, Swift.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    clang \
+    golang-go \
+    openjdk-17-jdk-headless \
+    rustc \
+    cargo \
+    php-cli \
+    ruby-full \
+    mono-devel \
+    kotlin \
+    scala \
+  && npm install -g typescript \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
+
+# Reuse the official Swift jammy toolchain rather than a custom tarball script.
+COPY --from=swift-toolchain /usr/bin/swift /usr/bin/swift
+COPY --from=swift-toolchain /usr/bin/swiftc /usr/bin/swiftc
+COPY --from=swift-toolchain /usr/bin/swift-* /usr/bin/
+COPY --from=swift-toolchain /usr/bin/sourcekit-lsp /usr/bin/sourcekit-lsp
+COPY --from=swift-toolchain /usr/lib/swift /usr/lib/swift
+COPY --from=swift-toolchain /usr/share/swift /usr/share/swift
+COPY --from=swift-toolchain /usr/lib/llvm-13 /usr/lib/llvm-13
+COPY --from=swift-toolchain /usr/lib/libsourcekitdInProc.so /usr/lib/libsourcekitdInProc.so
+COPY --from=swift-toolchain /usr/lib/libIndexStore.so /usr/lib/libIndexStore.so
+
+# Mono exposes mcs/mono-csc on Ubuntu. OpenMAIC expects csc, so provide
+# a stable shim in the sandbox image.
+RUN ln -sf /usr/bin/mcs /usr/local/bin/csc
+
+# Fail the image build early if any required runtime command is missing.
+RUN command -v node \
+  && command -v tsc \
+  && command -v java \
+  && command -v javac \
+  && command -v go \
+  && command -v rustc \
+  && command -v php \
+  && command -v ruby \
+  && command -v csc \
+  && command -v mono \
+  && command -v kotlinc \
+  && command -v swift \
+  && command -v scala \
+  && command -v scalac

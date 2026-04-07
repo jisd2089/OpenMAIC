@@ -7,6 +7,7 @@ import {
   Play,
   Pause,
   PencilLine,
+  Code2,
   LayoutList,
   MessageSquare,
   Volume1,
@@ -35,6 +36,8 @@ export interface CanvasToolbarProps {
   readonly onNextSlide: () => void;
   readonly onPlayPause: () => void;
   readonly onWhiteboardClose: () => void;
+  readonly codeEditorOpen?: boolean;
+  readonly onCodeEditorToggle?: () => void;
   readonly showStopDiscussion?: boolean;
   readonly onStopDiscussion?: () => void;
   readonly isPresenting?: boolean;
@@ -94,6 +97,8 @@ export function CanvasToolbar({
   onNextSlide,
   onPlayPause,
   onWhiteboardClose,
+  codeEditorOpen = false,
+  onCodeEditorToggle,
   showStopDiscussion,
   onStopDiscussion,
   isPresenting,
@@ -393,6 +398,26 @@ export function CanvasToolbar({
               <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 bg-violet-500 dark:bg-violet-400 rounded-full" />
             )}
           </button>
+
+          {onCodeEditorToggle ? (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onCodeEditorToggle();
+              }}
+              className={cn(
+                ctrlBtn,
+                'w-6 h-6',
+                codeEditorOpen
+                  ? 'text-cyan-600 dark:text-cyan-400'
+                  : 'text-gray-500 dark:text-gray-400',
+              )}
+              title="代码编辑器"
+              aria-label="Code editor"
+            >
+              <Code2 className="w-3.5 h-3.5" />
+            </button>
+          ) : null}
         </div>
       </div>
 

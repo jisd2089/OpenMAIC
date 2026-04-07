@@ -824,11 +824,8 @@ function HomePage() {
           classrooms.length === 0 ? 'justify-center min-h-[calc(100dvh-8rem)]' : 'mt-[10vh]',
         )}
       >
-        {/* Logo */}
-        <motion.img
-          src="/logo-horizontal.png"
-          alt="OpenMAIC"
-          initial={{ opacity: 0, scale: 0.9 }}
+        <motion.h1
+          initial={{ opacity: 0, scale: 0.96 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{
             delay: 0.1,
@@ -836,8 +833,10 @@ function HomePage() {
             stiffness: 200,
             damping: 20,
           }}
-          className="h-12 md:h-16 mb-2 -ml-2 md:-ml-3"
-        />
+          className="mb-2 text-3xl font-black tracking-[0.18em] text-slate-900 dark:text-slate-100 md:text-5xl"
+        >
+          iotek
+        </motion.h1>
 
         {/* Slogan */}
         <motion.p
@@ -1349,7 +1348,7 @@ function HomePage() {
 
       {/* Footer - flows with content, at the very end */}
       <div className="mt-auto pt-12 pb-4 text-center text-xs text-muted-foreground/40">
-        OpenMAIC Open Source Project
+        iotek Open Source Project
       </div>
     </div>
   );

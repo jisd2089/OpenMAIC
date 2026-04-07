@@ -7,6 +7,7 @@ import {
   useCallback,
   useState,
   useMemo,
+  useEffect,
   type ReactNode,
 } from 'react';
 import type { SessionType } from '@/lib/types/chat';
@@ -46,6 +47,7 @@ interface ChatAreaProps {
   shouldHoldAfterReveal?: () => { holding: boolean; segmentDone: number } | boolean;
   currentSceneId?: string | null;
   extraTabs?: ChatAreaExtraTab[];
+  onActiveTabChange?: (tab: string) => void;
 }
 
 export interface ChatAreaExtraTab {
@@ -100,6 +102,7 @@ export const ChatArea = forwardRef<ChatAreaRef, ChatAreaProps>(
       shouldHoldAfterReveal,
       currentSceneId,
       extraTabs = [],
+      onActiveTabChange,
     },
     ref,
   ) => {
@@ -141,6 +144,11 @@ export const ChatArea = forwardRef<ChatAreaRef, ChatAreaProps>(
     const isDraggingRef = useRef(false);
     const [isDragging, setIsDragging] = useState(false);
     const bottomRef = useRef<HTMLDivElement>(null);
+    const validTabs = useMemo(
+      () => new Set(['lecture', 'chat', ...extraTabs.map((tab) => tab.value)]),
+      [extraTabs],
+    );
+    const resolvedActiveTab = validTabs.has(activeTab) ? activeTab : 'lecture';
 
     // Derive lecture notes directly from scenes — updates reactively as scenes stream in
     // Preserves action order so spotlight/laser badges appear inline between speech texts
@@ -222,6 +230,10 @@ export const ChatArea = forwardRef<ChatAreaRef, ChatAreaProps>(
       switchToTab,
     }));
 
+    useEffect(() => {
+      onActiveTabChange?.(resolvedActiveTab);
+    }, [onActiveTabChange, resolvedActiveTab]);
+
     // Drag-to-resize
     const handleDragStart = useCallback(
       (e: React.MouseEvent) => {
@@ -279,8 +291,8 @@ export const ChatArea = forwardRef<ChatAreaRef, ChatAreaProps>(
 
         <div className={cn('flex flex-col w-full h-full overflow-hidden', collapsed && 'hidden')}>
           <Tabs
-            value={activeTab}
-            onValueChange={(v) => setActiveTab(v as 'lecture' | 'chat')}
+            value={resolvedActiveTab}
+            onValueChange={(v) => setActiveTab(v)}
             className="flex flex-col h-full gap-0"
           >
             {/* Tab header row */}

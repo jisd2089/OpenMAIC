@@ -7,6 +7,7 @@ import { generateClassroomRequestSchema } from '@/lib/server/generation/contract
 import { runClassroomGenerationJob } from '@/lib/server/classroom-job-runner';
 import { createClassroomGenerationJob } from '@/lib/server/classroom-job-store';
 import { buildRequestOrigin } from '@/lib/server/classroom-storage';
+import { getPreferredServerTTSProviderId } from '@/lib/server/provider-config';
 
 export const maxDuration = 30;
 
@@ -28,9 +29,27 @@ function headerNumber(req: NextRequest, key: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function resolveEnableTTS(req: NextRequest, body: GenerateClassroomInput): boolean | undefined {
+  if (body.enableTTS !== undefined) {
+    return body.enableTTS;
+  }
+
+  const requestedProvider = headerValue(req, 'x-tts-provider');
+  if (requestedProvider) {
+    return requestedProvider !== 'browser-native-tts';
+  }
+
+  return !!getPreferredServerTTSProviderId();
+}
+
 function buildGenerationInput(req: NextRequest, body: GenerateClassroomInput): GenerateClassroomInput {
   return {
     ...body,
+    enableImageGeneration:
+      body.enableImageGeneration ?? headerBoolean(req, 'x-image-generation-enabled'),
+    enableVideoGeneration:
+      body.enableVideoGeneration ?? headerBoolean(req, 'x-video-generation-enabled'),
+    enableTTS: resolveEnableTTS(req, body),
     modelConfig: {
       modelString: headerValue(req, 'x-model'),
       apiKey: headerValue(req, 'x-api-key'),

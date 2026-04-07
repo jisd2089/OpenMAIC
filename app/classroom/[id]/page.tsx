@@ -634,6 +634,8 @@ export default function ClassroomDetailPage() {
             </div>
           ) : (
             <Stage
+              classroomId={classroomId}
+              classroomView={classroomView}
               onRetryOutline={retrySingleOutline}
               rightPanelExtraTabs={classroomOpsTabs}
             />

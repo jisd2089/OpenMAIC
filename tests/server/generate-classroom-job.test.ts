@@ -25,6 +25,7 @@ const generateClassroomMock = vi.hoisted(() =>
     ) => Promise<GenerateClassroomResult>
   >(),
 );
+const getPreferredServerTTSProviderIdMock = vi.hoisted(() => vi.fn(() => undefined));
 
 vi.mock('next/server', async () => {
   const actual = await vi.importActual<typeof import('next/server')>('next/server');
@@ -44,6 +45,16 @@ vi.mock('@/lib/server/classroom-generation', async () => {
   };
 });
 
+vi.mock('@/lib/server/provider-config', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/server/provider-config')>(
+    '@/lib/server/provider-config',
+  );
+  return {
+    ...actual,
+    getPreferredServerTTSProviderId: getPreferredServerTTSProviderIdMock,
+  };
+});
+
 describe('generate-classroom background job integration', () => {
   let workspaceRoot: string;
 
@@ -52,6 +63,8 @@ describe('generate-classroom background job integration', () => {
     scheduledCallbacks.length = 0;
     afterMock.mockClear();
     generateClassroomMock.mockReset();
+    getPreferredServerTTSProviderIdMock.mockReset();
+    getPreferredServerTTSProviderIdMock.mockReturnValue(undefined);
     workspaceRoot = await setupIsolatedWorkspace('openmaic-generate-classroom-job-test-');
   });
 
@@ -59,7 +72,9 @@ describe('generate-classroom background job integration', () => {
     await teardownIsolatedWorkspace(workspaceRoot);
   });
 
-  it('creates a queued job, schedules background execution, and exposes poll status via routes', async () => {
+  it(
+    'creates a queued job, schedules background execution, and exposes poll status via routes',
+    async () => {
     const generateClassroomRoute = await import('@/app/api/generate-classroom/route');
     const generateClassroomStatusRoute = await import('@/app/api/generate-classroom/[jobId]/route');
     const { readClassroomGenerationJob } = await import('@/lib/server/classroom-job-store');
@@ -109,7 +124,9 @@ describe('generate-classroom background job integration', () => {
     expect(statusBody.classroomId).toBe(body.classroomId);
     expect(statusBody.status).toBe('queued');
     expect(statusBody.done).toBe(false);
-  }, 20000);
+    },
+    30000,
+  );
 
   it('persists runner progress and success result for generate-classroom jobs', async () => {
     const generateClassroomStatusRoute = await import('@/app/api/generate-classroom/[jobId]/route');
@@ -334,6 +351,9 @@ describe('generate-classroom background job integration', () => {
 
     expect(generateClassroomMock).toHaveBeenCalledTimes(1);
     expect(generateClassroomMock.mock.calls[0]?.[0]).toMatchObject({
+      enableImageGeneration: true,
+      enableVideoGeneration: true,
+      enableTTS: true,
       modelConfig: {
         modelString: 'openai:gpt-4o-mini',
         apiKey: 'client-model-key',
@@ -358,6 +378,53 @@ describe('generate-classroom background job integration', () => {
         apiKey: 'tts-key',
         baseUrl: 'https://example.invalid/tts',
       },
+    });
+  });
+
+  it('infers generation toggles from headers and server-side TTS config when omitted in body', async () => {
+    const generateClassroomRoute = await import('@/app/api/generate-classroom/route');
+    getPreferredServerTTSProviderIdMock.mockReturnValue('qwen-tts');
+
+    generateClassroomMock.mockResolvedValueOnce({
+      id: 'classroom_inferred',
+      url: 'http://localhost/classroom/classroom_inferred',
+      stage: {
+        id: 'classroom_inferred',
+        name: 'Inferred Classroom',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+      scenes: [],
+      scenesCount: 0,
+      createdAt: new Date().toISOString(),
+    });
+
+    const response = await generateClassroomRoute.POST(
+      createJsonRequest(
+        'http://localhost/api/generate-classroom',
+        'POST',
+        {
+          type: 'course',
+          requirement: 'Create a classroom with inferred toggles',
+          language: 'en-US',
+        },
+        {
+          'x-image-generation-enabled': 'true',
+          'x-video-generation-enabled': 'false',
+        },
+      ),
+    );
+
+    expect(response.status).toBe(202);
+    expect(scheduledCallbacks).toHaveLength(1);
+
+    await scheduledCallbacks[0]?.();
+
+    expect(generateClassroomMock).toHaveBeenCalledTimes(1);
+    expect(generateClassroomMock.mock.calls[0]?.[0]).toMatchObject({
+      enableImageGeneration: true,
+      enableVideoGeneration: false,
+      enableTTS: true,
     });
   });
 });

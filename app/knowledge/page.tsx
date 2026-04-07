@@ -2,7 +2,7 @@
 import { KnowledgeWorkbench } from '@/components/kb/knowledge-workbench';
 
 export const metadata: Metadata = {
-  title: 'Knowledge Workspace | OpenMAIC',
+  title: 'Knowledge Workspace | iotek',
   description: 'Manage knowledge bases, uploaded assets, and memory notes for classroom generation.',
 };
 

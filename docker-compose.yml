@@ -1,6 +1,6 @@
 services:
   openmaic:
-    image: openmaic-openmaic:20260402
+    image: openmaic-openmaic:20260404
     build: .
     ports:
       - "3000:3000"
@@ -10,6 +10,7 @@ services:
       # Optional: mount server-providers.yml for provider config
       # - ./server-providers.yml:/app/server-providers.yml:ro
       - openmaic-data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
 
 volumes:

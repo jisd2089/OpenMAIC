@@ -22,6 +22,10 @@ import { cn } from '@/lib/utils';
 import { ChatArea, type ChatAreaRef } from '@/components/chat/chat-area';
 import type { ChatAreaExtraTab } from '@/components/chat/chat-area';
 import { ClassroomEditorWorkspace } from '@/components/classroom/classroom-editor-workspace';
+import { CodeWorkbenchPanel } from '@/components/code/code-workbench-panel';
+import { CODE_WORKBENCH_TAB, isCodeWorkbenchTab } from '@/lib/code/workbench-tabs';
+import { useCodeWorkbench } from '@/lib/hooks/use-code-workbench';
+import type { ClassroomView } from '@/lib/classroom/view';
 import { agentsToParticipants, useAgentRegistry } from '@/lib/orchestration/registry/store';
 import type { AgentConfig } from '@/lib/orchestration/registry/types';
 import {
@@ -32,7 +36,7 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
 } from '@/components/ui/alert-dialog';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Code2 } from 'lucide-react';
 import { VisuallyHidden } from 'radix-ui';
 
 /**
@@ -43,9 +47,13 @@ import { VisuallyHidden } from 'radix-ui';
  * Supports two modes: autonomous and playback.
  */
 export function Stage({
+  classroomId,
+  classroomView,
   onRetryOutline,
   rightPanelExtraTabs,
 }: {
+  classroomId: string;
+  classroomView: ClassroomView;
   onRetryOutline?: (outlineId: string) => Promise<void>;
   rightPanelExtraTabs?: ChatAreaExtraTab[];
 }) {
@@ -58,6 +66,12 @@ export function Stage({
   const workspaceMode = useStageStore.use.workspaceMode();
 
   const currentScene = getCurrentScene();
+  const codeWorkbench = useCodeWorkbench({
+    classroomId,
+    sceneId: currentScene?.id ?? null,
+    view: classroomView,
+    enabled: workspaceMode === 'present',
+  });
   const previewScene = useMemo(() => {
     if (!currentSceneId || !showRegenerationPreview) return null;
     return regenerationPreviewScenes.find((scene) => scene.id === currentSceneId) || null;
@@ -119,6 +133,7 @@ export function Stage({
   const [isPresenting, setIsPresenting] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [isPresentationInteractionActive, setIsPresentationInteractionActive] = useState(false);
+  const [activeRightPanelTab, setActiveRightPanelTab] = useState('lecture');
 
   // Whiteboard state (from canvas store so AI tools can open it)
   const whiteboardOpen = useCanvasStore.use.whiteboardOpen();
@@ -808,6 +823,71 @@ export function Stage({
     setWhiteboardOpen(!whiteboardOpen);
   };
 
+  const handleCodeEditorToggle = useCallback(() => {
+    chatAreaRef.current?.switchToTab(CODE_WORKBENCH_TAB);
+  }, []);
+
+  const handleRunCode = useCallback(async () => {
+    chatAreaRef.current?.switchToTab(CODE_WORKBENCH_TAB);
+    await codeWorkbench.runCode();
+  }, [codeWorkbench]);
+
+  const mergedRightPanelTabs = useMemo<ChatAreaExtraTab[]>(() => {
+    if (workspaceMode !== 'present') {
+      return rightPanelExtraTabs ?? [];
+    }
+
+    const codeTab: ChatAreaExtraTab = {
+      value: CODE_WORKBENCH_TAB,
+      label: '代码运行',
+      icon: <Code2 className="w-3.5 h-3.5" />,
+      content: (
+        <CodeWorkbenchPanel
+          sceneTitle={displayScene?.title || currentScene?.title || ''}
+          draft={codeWorkbench.draft}
+          runtimes={codeWorkbench.runtimes}
+          runtime={codeWorkbench.runtime}
+          execution={codeWorkbench.execution}
+          isLoading={codeWorkbench.isLoadingSession}
+          isSaving={codeWorkbench.isSaving}
+          isRunning={codeWorkbench.isRunning}
+          error={codeWorkbench.error}
+          onLanguageChange={codeWorkbench.setLanguage}
+          onEntrypointChange={codeWorkbench.setEntrypoint}
+          onSelectFile={codeWorkbench.setActiveFilePath}
+          onChangeFileContent={codeWorkbench.setActiveFileContent}
+          onChangeStdin={codeWorkbench.setStdin}
+          onSave={codeWorkbench.saveDraft}
+          onRun={handleRunCode}
+          onStop={codeWorkbench.stopExecution}
+        />
+      ),
+    };
+
+    return [...(rightPanelExtraTabs ?? []), codeTab];
+  }, [
+    codeWorkbench.draft,
+    codeWorkbench.error,
+    codeWorkbench.execution,
+    codeWorkbench.isLoadingSession,
+    codeWorkbench.isSaving,
+    codeWorkbench.isRunning,
+    codeWorkbench.runtime,
+    codeWorkbench.runtimes,
+    codeWorkbench.saveDraft,
+    codeWorkbench.setActiveFileContent,
+    codeWorkbench.setActiveFilePath,
+    codeWorkbench.setEntrypoint,
+    codeWorkbench.setLanguage,
+    codeWorkbench.setStdin,
+    codeWorkbench.stopExecution,
+    currentScene?.title,
+    displayScene?.title,
+    handleRunCode,
+    rightPanelExtraTabs,
+    workspaceMode,
+  ]);
+
   const isPresentationShortcutTarget = useCallback((target: EventTarget | null) => {
     if (!(target instanceof HTMLElement)) return false;
 
@@ -1013,6 +1093,8 @@ export function Stage({
               onNextSlide={handleNextScene}
               onPlayPause={handlePlayPause}
               onWhiteboardClose={handleWhiteboardToggle}
+              codeEditorOpen={isCodeWorkbenchTab(activeRightPanelTab)}
+              onCodeEditorToggle={handleCodeEditorToggle}
               isPresenting={isPresenting}
               onTogglePresentation={togglePresentation}
               showStopDiscussion={
@@ -1230,7 +1312,8 @@ export function Stage({
         onStopSession={doSessionCleanup}
         onSegmentSealed={discussionTTS.handleSegmentSealed}
         shouldHoldAfterReveal={discussionTTS.shouldHold}
-        extraTabs={rightPanelExtraTabs}
+        extraTabs={mergedRightPanelTabs}
+        onActiveTabChange={setActiveRightPanelTab}
       />
 
       {/* Scene switch confirmation dialog */}

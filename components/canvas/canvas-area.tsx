@@ -38,6 +38,8 @@ export function CanvasArea({
   onNextSlide,
   onPlayPause,
   onWhiteboardClose,
+  codeEditorOpen,
+  onCodeEditorToggle,
   isPresenting,
   onTogglePresentation,
   showStopDiscussion,
@@ -257,6 +259,8 @@ export function CanvasArea({
           onNextSlide={onNextSlide}
           onPlayPause={onPlayPause}
           onWhiteboardClose={onWhiteboardClose}
+          codeEditorOpen={codeEditorOpen}
+          onCodeEditorToggle={onCodeEditorToggle}
           isPresenting={isPresenting}
           onTogglePresentation={onTogglePresentation}
           showStopDiscussion={showStopDiscussion}
