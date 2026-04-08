@@ -1,0 +1,139 @@
+# OpenMAIC v0.3 远程 Docker Compose 部署排查记录（2026-04-08）
+
+## 背景
+
+当前使用方式为：
+
+1. 服务端通过 `docker compose` 部署 OpenMAIC
+2. 本地浏览器远程访问服务端页面
+3. 现场验证发现两个问题：
+   - 新创建的课程在浏览器端没有声音
+   - 打开“代码工作台”显示“未运行”，并提示 `Classroom not found`
+
+本记录基于当前仓库代码和部署配置进行静态排查，未直接读取线上容器日志。
+
+## 结论一：新建课程无声音，根因是当前远程部署链路依赖服务端 TTS，而不是自动回退到浏览器 TTS
+
+### 关键代码路径
+
+1. 服务端课堂生成入口在 `app/api/generate-classroom/route.ts`
+2. 服务端 TTS 生成逻辑在 `lib/server/classroom-media-generation.ts`
+3. 播放时优先使用 `speechAction.audioUrl`，其次才尝试本地 `audioId`，逻辑在 `lib/utils/audio-player.ts`
+4. 播放阶段只有在“没有预生成音频”且当前设置仍为 `browser-native-tts` 时，才会回退到浏览器 Web Speech API，逻辑在 `lib/playback/engine.ts`
+
+### 排查结果
+
+1. `/api/generate-classroom` 走的是服务端生成链路，`enableTTS` 一旦开启，会调用 `generateTTSForClassroom()`
+2. `generateTTSForClassroom()` 只接受服务端可用的 TTS provider；如果没有配置服务端 TTS provider 或缺少 API key，会直接跳过 TTS 生成
+3. 跳过后，场景里的 `speechAction` 不会写入 `audioUrl`
+4. 对远程部署来说，这意味着：
+   - 只配了 LLM、PDF、图片、视频，不配 TTS 时，课堂会正常创建
+   - 但课堂播放时没有可直接播放的服务端语音文件
+5. 当前实现不会在服务端生成链路里自动把 TTS 回退为 `browser-native-tts`
+
+### 对部署的实际含义
+
+1. 如果希望远程部署后“新建课程即有声音”，必须在服务端容器内配置 TTS provider
+2. 可用配置方式是：
+   - `.env.local` 中的 `TTS_*` 环境变量
+   - 或挂载 `server-providers.yml`
+3. 如果未配置服务端 TTS，当前现象“课程能生成但没有声音”符合代码行为，不是播放器单点故障
+
+### 补充判断
+
+1. 浏览器原生 TTS 只是在播放阶段的兜底策略，不是服务端课堂生成的默认后备方案
+2. 因此远程部署验收时，不能只验证“页面能播放”，还要验证课堂数据里是否实际生成了 `audioUrl`
+
+## 结论二：代码工作台报 `Classroom not found`，根因是课堂只存在浏览器本地，没有持久化到服务端
+
+### 关键代码路径
+
+1. 课堂页加载逻辑在 `app/classroom/[id]/page.tsx`
+2. 代码工作台 session 创建入口在 `app/api/classroom/[id]/code-sessions/route.ts`
+3. 服务端课堂读取逻辑在 `lib/server/classroom-storage.ts`
+4. 生成预览页完成创建后的落盘逻辑在 `app/generation-preview/page.tsx`
+
+### 排查结果
+
+1. 课堂页加载时，先尝试 `loadFromStorage(classroomId)`，也就是先读浏览器 IndexedDB
+2. 只有本地没有数据时，课堂页才会兜底请求 `/api/classroom?id=...`
+3. 这意味着：
+   - 某个课堂即使只存在于当前浏览器本地
+   - 页面本身也仍然可以正常打开
+4. 但是代码工作台的 `POST /api/classroom/:id/code-sessions` 在创建 session 之前，会先调用 `readClassroom(id)`
+5. `readClassroom(id)` 只读取服务端的 `data/classrooms/<id>.json`
+6. 只要这个文件不存在，接口就直接返回 `Classroom not found`
+7. 当前 `generation-preview` 创建课堂后，只做了：
+   - `saveToStorage()`，写入浏览器本地
+   - `router.push('/classroom/:id')`
+8. 当前 `generation-preview` 没有同步调用：
+   - `POST /api/classroom`
+   - 或 `PATCH /api/classroom/:id`
+9. 因此，课堂“页面可打开，但代码工作台报 `Classroom not found`”是当前实现边界不一致导致的结果
+
+### 对部署的实际含义
+
+1. 这不是 Docker sandbox 本身的首要报错来源
+2. 首要问题是课堂数据的存储位置不一致：
+   - 课堂页允许只用本地 IndexedDB
+   - 代码工作台只认服务端持久化课堂
+3. 只要课堂没有先落到 `/app/data/classrooms`，代码工作台、导出、重生成等依赖服务端课堂的能力都会有同类风险
+
+## 部署配置补充检查
+
+### 1. TTS
+
+远程部署验收时需要额外确认：
+
+1. 容器内是否配置了至少一个服务端 TTS provider
+2. `GET /api/health` 返回的 `tts` 是否为可用状态
+3. 新生成课堂的 `speechAction` 是否包含 `audioUrl`
+4. `/api/classroom-media/:classroomId/audio/...` 是否能返回 200
+
+### 2. 课堂持久化
+
+远程部署验收时需要额外确认：
+
+1. 新建课堂后，服务端 `data/classrooms/<classroomId>.json` 是否存在
+2. 不是只验证页面是否能打开，还要验证服务端课堂文件是否已经落盘
+3. 在使用代码工作台前，应先确认课堂已经进入服务端持久化目录
+
+### 3. Code Sandbox 工作目录
+
+虽然这不是本次 `Classroom not found` 的直接根因，但当前 Docker Compose 场景还需要保持以下前提：
+
+1. `OPENMAIC_CODE_SANDBOX_LOCAL_WORKSPACE_ROOT` 应落在持久化卷内
+2. 当前示例更安全的目标路径是 `/app/data/code-sandbox`
+3. 否则即便后续课堂已持久化，code session / workspace 仍可能在容器重启后丢失
+
+## 当前判断
+
+1. “新建课程无声音”本质上是服务端课堂生成链路缺少服务端 TTS 配置
+2. “代码工作台 `Classroom not found`”本质上是本地课堂与服务端课堂持久化边界不一致
+3. 两个问题都与远程 Docker Compose 部署方式有关，但不是同一个根因
+4. 当前仓库内尚未看到“生成预览完成后自动持久化课堂到服务端”的闭环实现
+
+## 建议后续动作
+
+1. 部署侧先补齐服务端 TTS 配置，再复验课堂播放
+2. 产品/实现侧需要决定：`generation-preview` 完成后是否默认把课堂同步持久化到服务端
+3. 若代码工作台要作为远程部署默认能力，课堂持久化必须前置，而不能只依赖浏览器 IndexedDB
+
+## 2026-04-08 代码跟进
+
+本次排查后，仓库内已补上两类实现修正和一类提示：
+
+1. `app/generation-preview/page.tsx`
+   - 生成完成后，先上传已生成的本地音频/媒体到服务端
+   - 然后调用 `ensureClassroomPersisted()`，在跳转课堂页前把课堂 JSON 持久化到服务端
+   - 这已经修复“课堂页能打开，但代码工作台创建 session 时提示 `Classroom not found`”的问题根因
+2. `app/page.tsx`
+   - 首页生成入口新增音频预警
+   - 当用户开启课程语音，但当前配置仍是 `browser-native-tts`，或所选 TTS 没有 API Key / 服务端配置时，界面会直接提示“新建课程不会在服务端生成可复用音频”
+   - 该提示不拦截生成，只用于把远程部署下的行为边界提前暴露给用户
+
+### 当前剩余边界
+
+1. 如果远程服务端仍未配置可用 TTS，系统不会凭空生成 `audioUrl`
+2. 因此，“生成链路自动持久化课堂”已经修复，但“远程部署下新课堂默认有声音”仍然依赖部署侧补齐 TTS
+3. 也就是说，代码侧现在已经能更早暴露问题、并避免课堂只落本地；但部署侧仍需完成 `TTS_*` 或 `server-providers.yml` 配置

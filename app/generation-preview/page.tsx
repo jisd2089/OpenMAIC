@@ -36,6 +36,8 @@ import {
 } from '@/lib/generation/session-storage';
 import { StepVisualizer } from './components/visualizers';
 import { extractGenerationTitle } from '@/lib/classroom/generation-title';
+import { ensureClassroomPersisted } from '@/lib/classroom/ensure-classroom-persisted';
+import { prepareCoursePackageAssets } from '@/lib/classroom/prepare-course-package-assets';
 
 const log = createLogger('GenerationPreview');
 
@@ -838,6 +840,23 @@ function GenerationPreviewContent() {
 
       sessionStorage.removeItem('generationSession');
       await store.saveToStorage();
+      try {
+        const preparedScenes = await prepareCoursePackageAssets({
+          classroomId: stage.id,
+          scenes: useStageStore.getState().scenes,
+        });
+        store.setScenes(preparedScenes);
+        await useStageStore.getState().saveToStorage();
+      } catch (assetError) {
+        log.warn('[GenerationPreview] Failed to persist generated assets to server:', assetError);
+      }
+      const persistedState = useStageStore.getState();
+      await ensureClassroomPersisted({
+        classroomId: stage.id,
+        stage: persistedState.stage,
+        scenes: persistedState.scenes,
+        operation: 'initial generation',
+      });
       router.push(`/classroom/${stage.id}`);
     } catch (err) {
       // AbortError is expected when navigating away — don't show as error

@@ -119,6 +119,9 @@ function HomePage() {
 
   // Model setup state
   const currentModelId = useSettingsStore((s) => s.modelId);
+  const ttsEnabled = useSettingsStore((s) => s.ttsEnabled);
+  const ttsProviderId = useSettingsStore((s) => s.ttsProviderId);
+  const ttsProvidersConfig = useSettingsStore((s) => s.ttsProvidersConfig);
   const [recentOpen, setRecentOpen] = useState(true);
 
   // Hydrate client-only state after mount (avoids SSR mismatch)
@@ -648,6 +651,47 @@ function HomePage() {
             : 0;
 
   const canGenerate = !!form.requirement.trim();
+  const audioGenerationWarning = useMemo(() => {
+    if (!ttsEnabled) return null;
+
+    const selectedTtsProvider = ttsProvidersConfig?.[ttsProviderId];
+    const hasSelectedApiKey = !!selectedTtsProvider?.apiKey?.trim();
+    const hasSelectedServerConfig = selectedTtsProvider?.isServerConfigured === true;
+
+    if (ttsProviderId === 'browser-native-tts') {
+      return locale === 'zh-CN'
+        ? {
+            title: '当前不会在服务端预生成课程音频',
+            description:
+              '你现在使用的是浏览器朗读。新建课程时不会写入可持久化的音频文件，远程 Docker 部署下换一台浏览器或打开代码工作台时，通常不会有现成声音可播。',
+            actionLabel: '打开语音设置',
+          }
+        : {
+            title: 'Course audio will not be pre-generated on the server',
+            description:
+              'The current TTS mode uses browser-native speech. New courses will not get persisted audio files, so remote Docker deployments usually have no reusable audio when opened from another browser or the code workbench.',
+            actionLabel: 'Open audio settings',
+          };
+    }
+
+    if (!hasSelectedApiKey && !hasSelectedServerConfig) {
+      return locale === 'zh-CN'
+        ? {
+            title: '当前 TTS 提供商没有可用凭据',
+            description:
+              '虽然已开启课程语音，但所选 TTS 既没有本地 API Key，也没有服务端配置。新建课程时会直接跳过语音生成。',
+            actionLabel: '打开语音设置',
+          }
+        : {
+            title: 'The selected TTS provider has no usable credentials',
+            description:
+              'Course speech is enabled, but the selected TTS provider has neither a local API key nor a server-side configuration. New courses will skip audio generation.',
+            actionLabel: 'Open audio settings',
+          };
+    }
+
+    return null;
+  }, [locale, ttsEnabled, ttsProviderId, ttsProvidersConfig]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -1061,6 +1105,33 @@ function HomePage() {
                       </button>
                     </div>
                   ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            {audioGenerationWarning ? (
+              <div className="mx-3 mb-3 rounded-2xl border border-amber-200/70 bg-amber-50/80 px-3 py-3 text-amber-900 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">
+                    <AlertCircle className="size-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold leading-tight">
+                      {audioGenerationWarning.title}
+                    </p>
+                    <p className="mt-1 text-xs leading-relaxed text-amber-800/90 dark:text-amber-200/85">
+                      {audioGenerationWarning.description}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setSettingsSection('tts');
+                      setSettingsOpen(true);
+                    }}
+                    className="shrink-0 rounded-lg border border-amber-300/80 bg-white/80 px-2.5 py-1 text-[11px] font-medium text-amber-900 transition hover:bg-white dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-100 dark:hover:bg-amber-950/50"
+                  >
+                    {audioGenerationWarning.actionLabel}
+                  </button>
                 </div>
               </div>
             ) : null}
