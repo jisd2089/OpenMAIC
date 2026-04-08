@@ -25,7 +25,7 @@ COPY --from=deps /app/packages ./packages
 COPY . .
 
 RUN pnpm --filter mathml2omml build && pnpm --filter pptxgenjs build
-RUN pnpm build
+RUN node scripts/normalize-source-encoding.mjs && pnpm build
 
 # ---- Stage 4: Runner ----
 FROM deps AS runner

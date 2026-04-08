@@ -197,3 +197,40 @@
 2. `corepack pnpm build` 已通过
 3. 当前在 Windows 本地仍可能看到 Next.js `standalone` traced files 复制警告，这与 Windows 路径及 `node:fs` chunk 命名有关
 4. 上述警告未阻塞本次构建；针对 Linux Docker 构建，当前已验证的阻塞项已清除
+
+## 2026-04-08 Docker 编码补充排查
+
+重新部署时，远程 `docker build` 又出现了 Turbopack 读取 `app/page.tsx` 与 `app/classroom/[id]/page.tsx` 失败，并报 `invalid utf-8 sequence`。
+
+排查结论：
+
+1. 本地仓库文件本身可以被 UTF-8 正常解码，且 `pnpm build` 在本地可通过。
+2. 但远程 Docker 构建链路里，Turbopack 对源码文件编码比本地开发环境更敏感；一旦工作区文件带有非法字节、BOM、或混入 Windows 风格换行/编码污染，就可能在解析阶段直接失败。
+3. 为了避免后续再出现“本地可构建、远程容器因源码编码失败”的情况，仓库新增了 `scripts/normalize-source-encoding.mjs`，并在 `Dockerfile` 的构建阶段、执行 `pnpm build` 之前先运行一次。
+4. 当前脚本只针对这次实际报错的两个入口文件执行归一化：
+   - `app/page.tsx`
+   - `app/classroom/[id]/page.tsx`
+5. 归一化动作包括：
+   - 清理 UTF-8 BOM
+   - 统一换行符为 LF
+   - 如果发现非法 UTF-8 字节，则以可恢复方式重写为有效 UTF-8 并打印告警
+
+当前结论更新：
+
+1. 这次 Docker 构建报错不是课堂业务逻辑回归，而是源码编码在容器构建阶段触发了 Turbopack 解析边界。
+2. 代码侧已加入构建前编码归一化保护，后续远程部署不再依赖服务器工作区编码状态“刚好正常”。
+## 2026-04-08 Docker 编码修复落地说明
+
+最终落地的代码修复是：
+
+1. 新增 `scripts/normalize-source-encoding.mjs`
+2. 在 `Dockerfile` 里于 `pnpm build` 前显式执行
+3. 当前只针对这次实际报错的两个入口文件执行归一化：
+   - `app/page.tsx`
+   - `app/classroom/[id]/page.tsx`
+4. 归一化动作包括：
+   - 去掉 UTF-8 BOM
+   - 统一为有效 UTF-8
+   - 统一换行符为 LF
+
+这次没有继续保留“大范围扫描整个仓库源码”的实现，也没有把页面源码整体改写为新的业务逻辑；目的是把修复范围控制在 Docker 构建实际失败的两个入口文件上。
