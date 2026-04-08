@@ -113,7 +113,7 @@ function normalizeDraft(next: CodeDraftState): CodeDraftState {
   };
 }
 
-async function parseJsonResponse(response: Response) {
+async function parseJsonResponse(response: Response): Promise<Record<string, unknown>> {
   let payload: Record<string, unknown> | null = null;
   let fallbackMessage = '';
 
@@ -131,6 +131,11 @@ async function parseJsonResponse(response: Response) {
         `Request failed: HTTP ${response.status}`,
     );
   }
+
+  if (!payload) {
+    throw new Error(fallbackMessage || 'Invalid JSON response');
+  }
+
   return payload;
 }
 

@@ -174,3 +174,26 @@
    - 课堂生成会优先使用可用的服务端 TTS 生成课堂音频
    - 课堂页会补同步本地课堂到服务端
    - 远程 compose 部署会默认进入 Docker AIO 沙箱模式
+# 2026-04-08 构建补充修复
+
+本次重新部署时，`pnpm build` 还暴露了一个独立于课堂音频和代码工作台的问题，已补充修复如下：
+
+1. `lib/hooks/use-code-workbench.ts`
+   - `parseJsonResponse()` 之前允许返回 `null`
+   - 生产构建里的 TypeScript 检查无法确认 `payload.session` 一定存在
+   - 现已收紧为“成功响应必须返回 JSON 对象，否则直接抛错”，消除空值类型报错
+2. `packages/mathml2omml/package.json` 与 `packages/pptxgenjs/package.json`
+   - 两个工作区包原先都把 `exports.import` 指向 `dist/*`
+   - 根应用执行 `pnpm build` 时，并不会先自动产出这些 `dist` 文件
+   - 这会导致 Turbopack 在解析 `mathml2omml` 和 `pptxgenjs` 时直接报 `Module not found`
+   - 现已把 `import` / `main` / `module` / `types` 入口改为直接指向仓库内源码入口，不再依赖预构建产物
+3. `types/mathml2omml.d.ts`
+   - 该文件原本只是临时的 ambient module 声明
+   - 在工作区包自身导出类型入口后已无必要，现已删除
+
+## 构建验证
+
+1. `corepack pnpm exec tsc --noEmit --pretty false` 已通过
+2. `corepack pnpm build` 已通过
+3. 当前在 Windows 本地仍可能看到 Next.js `standalone` traced files 复制警告，这与 Windows 路径及 `node:fs` chunk 命名有关
+4. 上述警告未阻塞本次构建；针对 Linux Docker 构建，当前已验证的阻塞项已清除

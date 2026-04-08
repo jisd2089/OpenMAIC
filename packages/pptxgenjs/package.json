@@ -10,11 +10,10 @@
 	"license": "MIT",
 	"exports": {
 		"types": "./types/index.d.ts",
-		"import": "./dist/pptxgen.es.js",
-		"require": "./dist/pptxgen.cjs.js"
+		"import": "./src/pptxgen.ts"
 	},
-	"main": "dist/pptxgen.cjs.js",
-	"module": "dist/pptxgen.es.js",
+	"main": "src/pptxgen.ts",
+	"module": "src/pptxgen.ts",
 	"files": [
 		"dist",
 		"types"

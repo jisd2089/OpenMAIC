@@ -131,7 +131,7 @@ describe('prepareCoursePackageAssets', () => {
     });
 
     const preparedElements = (
-      preparedScenes[0].content as {
+      preparedScenes[0].content as unknown as {
         canvas: { elements: Array<Record<string, unknown>> };
       }
     ).canvas.elements;

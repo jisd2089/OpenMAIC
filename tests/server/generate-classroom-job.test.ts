@@ -6,6 +6,7 @@ import {
   teardownIsolatedWorkspace,
 } from './test-utils';
 import type { GenerateClassroomInput, GenerateClassroomResult } from '@/lib/server/classroom-generation';
+import type { TTSProviderId } from '@/lib/audio/types';
 
 const scheduledCallbacks = vi.hoisted<Array<() => void | Promise<void>>>(() => []);
 const afterMock = vi.hoisted(() =>
@@ -25,7 +26,9 @@ const generateClassroomMock = vi.hoisted(() =>
     ) => Promise<GenerateClassroomResult>
   >(),
 );
-const getPreferredServerTTSProviderIdMock = vi.hoisted(() => vi.fn(() => undefined));
+const getPreferredServerTTSProviderIdMock = vi.hoisted(() =>
+  vi.fn<() => TTSProviderId | undefined>(() => undefined),
+);
 
 vi.mock('next/server', async () => {
   const actual = await vi.importActual<typeof import('next/server')>('next/server');
