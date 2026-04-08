@@ -204,10 +204,58 @@ describe('code sandbox configuration', () => {
     });
 
     expect(session.providerMode).toBe('aio');
+    expect(session.sandboxId).toBe('sandbox_aio_global');
     expect(dockerRunCalls).toHaveLength(1);
+    expect(dockerRunCalls[0]).toContain('--name openmaic-sandbox-sandbox_aio_global');
     expect(dockerRunCalls[0]).toContain('--security-opt seccomp=unconfined');
     expect(dockerRunCalls[0]).toContain('--add-host host.docker.internal:host-gateway');
     expect(dockerRunCalls[0]).toContain('--shm-size=1g');
+  });
+
+  it('reuses one shared aio sandbox container across browser sessions', async () => {
+    process.env.OPENMAIC_CODE_SANDBOX_MODE = 'aio';
+    process.env.OPENMAIC_CODE_SANDBOX_AIO_BACKEND = 'docker';
+    process.env.OPENMAIC_CODE_SANDBOX_AIO_IMAGE = 'openmaic-sandbox:20260404';
+    const dockerRunCalls: string[] = [];
+    const runningStates = ['false', 'false', 'true'];
+    execFileSyncMock.mockImplementation((command, args) => {
+      const joined = [command, ...(args as string[])].join(' ');
+      if (joined.includes('inspect -f {{.State.Running}} openmaic-sandbox-sandbox_aio_global')) {
+        return runningStates.shift() ?? 'true';
+      }
+      if (
+        joined.includes(
+          'inspect -f {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} openmaic-sandbox-sandbox_aio_global',
+        )
+      ) {
+        return 'healthy';
+      }
+      if (joined.includes('docker run -d --rm --name openmaic-sandbox-sandbox_aio_global')) {
+        dockerRunCalls.push(joined);
+        return 'sandbox-container-id';
+      }
+      return '';
+    });
+
+    const { createOrRestoreCodeSession } = await import('@/lib/server/code/service');
+    const first = await createOrRestoreCodeSession({
+      classroomId: 'sandbox_course',
+      sceneId: 'scene_1',
+      clientSessionId: 'aio_tab_1',
+      view: 'teacher',
+      language: 'javascript',
+    });
+    const second = await createOrRestoreCodeSession({
+      classroomId: 'sandbox_course',
+      sceneId: 'scene_1',
+      clientSessionId: 'aio_tab_2',
+      view: 'teacher',
+      language: 'javascript',
+    });
+
+    expect(first.session.sandboxId).toBe('sandbox_aio_global');
+    expect(second.session.sandboxId).toBe('sandbox_aio_global');
+    expect(dockerRunCalls).toHaveLength(1);
   });
 
   it('rejects invalid provisioner configuration instead of silently falling back', async () => {
@@ -245,10 +293,10 @@ describe('code sandbox configuration', () => {
       if (joined.includes('inspect -f {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}')) {
         return 'unhealthy';
       }
-      if (joined.includes('docker stop openmaic-sandbox-sandbox_')) {
+      if (joined.includes('docker stop openmaic-sandbox-sandbox_aio_global')) {
         return 'stopped';
       }
-      if (joined.includes('docker run -d --rm --name')) {
+      if (joined.includes('docker run -d --rm --name openmaic-sandbox-sandbox_aio_global')) {
         return 'sandbox-container-id';
       }
       return '';
@@ -266,33 +314,21 @@ describe('code sandbox configuration', () => {
     expect(session.providerMode).toBe('aio');
     expect(dockerCalls).toEqual(
       expect.arrayContaining([
-        expect.stringContaining('inspect -f {{.State.Running}} openmaic-sandbox-sandbox_'),
+        expect.stringContaining('inspect -f {{.State.Running}} openmaic-sandbox-sandbox_aio_global'),
         expect.stringContaining(
-          'inspect -f {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} openmaic-sandbox-sandbox_',
+          'inspect -f {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} openmaic-sandbox-sandbox_aio_global',
         ),
-        expect.stringContaining('docker stop openmaic-sandbox-sandbox_'),
-        expect.stringContaining('docker run -d --rm --name openmaic-sandbox-sandbox_'),
+        expect.stringContaining('docker stop openmaic-sandbox-sandbox_aio_global'),
+        expect.stringContaining('docker run -d --rm --name openmaic-sandbox-sandbox_aio_global'),
       ]),
     );
   });
 
-  it('stops idle aio sandbox containers after idle timeout and normalizes session state', async () => {
+  it('normalizes stale aio session state without stopping the shared sandbox container', async () => {
     process.env.OPENMAIC_CODE_SANDBOX_MODE = 'aio';
     process.env.OPENMAIC_CODE_SANDBOX_AIO_BACKEND = 'docker';
     process.env.OPENMAIC_CODE_SANDBOX_AIO_IMAGE = 'openmaic-sandbox:20260404';
     process.env.OPENMAIC_CODE_SANDBOX_AIO_IDLE_TIMEOUT_SEC = '60';
-    const dockerCalls: string[] = [];
-    execFileSyncMock.mockImplementation((command, args) => {
-      const joined = [command, ...(args as string[])].join(' ');
-      dockerCalls.push(joined);
-      if (joined.includes('inspect -f {{.State.Running}} openmaic-sandbox-sandbox_idle_timeout_tab')) {
-        return 'true';
-      }
-      if (joined.includes('docker stop openmaic-sandbox-sandbox_idle_timeout_tab')) {
-        return 'stopped';
-      }
-      return '';
-    });
 
     const staleTimestamp = new Date(Date.now() - 10 * 60_000).toISOString();
     const { writeCodeExecution, writeCodeSession, readCodeSession } = await import(
@@ -305,7 +341,7 @@ describe('code sandbox configuration', () => {
       clientSessionId: 'idle_timeout_tab',
       view: 'teacher',
       providerMode: 'aio',
-      sandboxId: 'sandbox_idle_timeout_tab',
+      sandboxId: 'sandbox_aio_global',
       language: 'javascript',
       entrypoint: 'index.js',
       stdin: '',
@@ -338,11 +374,6 @@ describe('code sandbox configuration', () => {
 
     const session = await readCodeSession('sandbox_course', 'idle_timeout_tab');
     expect(session?.status).toBe('ready');
-    expect(dockerCalls).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining('inspect -f {{.State.Running}} openmaic-sandbox-sandbox_idle_timeout_tab'),
-        expect.stringContaining('docker stop openmaic-sandbox-sandbox_idle_timeout_tab'),
-      ]),
-    );
+    expect(execFileSyncMock).not.toHaveBeenCalled();
   });
 });

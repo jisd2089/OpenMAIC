@@ -44,7 +44,7 @@
    - provider 抽象
    - 沙箱生命周期
    - 挂载策略
-   - idle timeout / warm pool / replicas
+   - 全局共享容器与工作区隔离边界
    - 本地模式与容器模式的职责边界
 4. 不直接复用的内容是：
    - Python 包导入方式
@@ -418,6 +418,7 @@ type CodeSessionScope = {
 1. 教师端与学生端不应互相覆盖实验代码
 2. 多浏览器打开同一课堂时不应共享临时代码草稿
 3. 代码实验天然是会话态，不是课堂结构化真值
+4. `aio` 模式下会话作用域只用于隔离草稿、工作区与执行记录，不再用于决定是否新建容器实例
 
 ### 3.7 前端与沙箱交互边界
 
@@ -632,23 +633,21 @@ OpenMAIC 设计约束：
 
 1. `AioSandboxProvider` 负责容器沙箱生命周期
 2. 支持线程级或会话级工作目录挂载
-3. 支持 idle timeout、warm pool、replicas 和远程 provisioner
+3. 支持共享容器下的多工作区复用，以及远程 provisioner 扩展
 4. 适合作为生产环境默认执行方式
 
 OpenMAIC 设计约束：
 
-1. 代码运行会话与容器沙箱一一对应或按 warm pool 复用
-2. 每个会话挂载独立工作目录
+1. `aio` 模式下整个 OpenMAIC 服务实例只启动一个全局共享沙箱容器，所有浏览器客户端复用该容器
+2. 每个会话仍保留独立 host 工作目录，运行时通过不同工作目录进入同一共享容器
 3. Web 预览端口需要通过受控反向代理或临时 URL 暴露
-4. 空闲会话按超时策略自动回收
+4. 单个会话释放只影响会话状态，不得停止共享容器
 5. 若复用 `deer-flow` 的容器逻辑，OpenMAIC 只复用运行模式和部署边界，不直接依赖其 Python 应用运行时
-6. 会话对应的 sandbox 标识必须可确定性重建，便于进程重启后重新发现现有容器
+6. 共享容器对应的 `sandboxId` 必须稳定可重建，便于进程重启后重新发现并复用同一个容器
 7. `release` 与 `destroy` 必须是两种不同语义：
-   - `release`：从活跃会话移出，但容器可进入 warm pool 复用
-   - `destroy`：真正销毁容器和相关资源
-8. `replicas` 视为软上限：
-   - 不应强行终止正在服务中的活跃会话
-   - 优先淘汰 warm pool 中最旧的沙箱
+   - `release`：从活跃会话移出，但共享容器继续保留
+   - `destroy`：真正销毁共享容器和相关资源
+8. `aio` 的运行隔离边界以“会话工作区”和“执行进程”区分，而不是以“每会话一容器”区分
 
 ### 5.3.1 Host 侧权威工作区与同步模型
 
@@ -686,17 +685,13 @@ OpenMAIC 设计约束：
 
 参考 `deer-flow` 的 deterministic sandbox id 与 backend discover 设计，OpenMAIC 应明确：
 
-1. `sandboxId` 应从会话作用域稳定推导：
-   - `classroomId`
-   - `sceneId`
-   - `clientSessionId`
-   - `view`
+1. `sandboxId` 应在 `aio` 模式下稳定映射为全局共享容器标识，而不是从单个会话作用域派生
 2. OpenMAIC 进程重启后，若 session 仍有效：
-   - 应能根据稳定 `sandboxId` 重新发现现有容器或 provisioner 资源
-   - 不应无条件新建 sandbox
+   - 应能根据稳定 `sandboxId` 重新发现现有共享容器或 provisioner 资源
+   - 不应因新浏览器会话进入而无条件新建 sandbox
 3. 前端刷新页面时恢复执行状态，依赖的是服务端可恢复的 session / execution 真值，而不是浏览器内存状态
-4. 多实例或多进程场景下，创建同一 `sandboxId` 时必须防止并发冲突
-5. 若底层发现已有 sandbox，则应优先复用，而不是重复创建
+4. 多实例或多进程场景下，创建同一共享 `sandboxId` 时必须防止并发冲突
+5. 若底层发现已有共享 sandbox，则应优先复用，而不是重复创建
 
 ### 5.4 提供者选择规则
 
@@ -713,7 +708,7 @@ codeSandbox:
     image: enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
     dockerSocketPath: /var/run/docker.sock
     sandboxHost: host.docker.internal
-    replicas: 3
+    sharedSandboxId: sandbox_aio_global
     idleTimeoutSec: 600
     workdirMountPath: /workspace
     previewBaseUrl: http://localhost:3000/api/code-preview
@@ -731,14 +726,14 @@ codeSandbox:
 2. Docker / 多用户 / 共享环境默认使用 `aio`
 3. 前端不允许通过请求参数直接切换提供者
 4. 当前提供者模式仅通过服务端部署配置决定
-5. `aio.backend=docker` 表示由 OpenMAIC 直接通过宿主 Docker 运行容器，语义对齐 `deer-flow` 的本地 Docker 模式
+5. `aio.backend=docker` 表示由 OpenMAIC 直接通过宿主 Docker 运行全局共享沙箱容器，语义对齐 `deer-flow` 的本地 Docker 模式
 6. `aio.backend=provisioner` 表示由独立 provisioner 负责容器或 Pod 生命周期，语义对齐 `deer-flow` 的 `provisioner_url` 模式
 
 配置映射说明：
 
 1. `deer-flow` 的 `sandbox.use` 在 OpenMAIC 中收敛为 `codeSandbox.mode`
-2. `deer-flow` 的 `idle_timeout` 在 OpenMAIC 中收敛为 `codeSandbox.aio.idleTimeoutSec`
-3. `deer-flow` 的 `replicas` 在 OpenMAIC 中收敛为 `codeSandbox.aio.replicas`
+2. `deer-flow` 的共享 sandbox 概念在 OpenMAIC 中收敛为 `codeSandbox.aio.sharedSandboxId`
+3. `deer-flow` 的 `idle_timeout` 在 OpenMAIC 中仅用于共享容器维护或陈旧会话整形，不再表达“每会话容器回收”
 4. `deer-flow` 的 `provisioner_url` 在 OpenMAIC 中收敛为 `codeSandbox.aio.provisioner.url`
 5. `deer-flow` 的 `DEER_FLOW_SANDBOX_HOST` 在 OpenMAIC 中收敛为 `codeSandbox.aio.sandboxHost`
 6. `deer-flow` 的 `SANDBOX_IMAGE` 在 OpenMAIC 中拆分为 `codeSandbox.aio.image` 与 `codeSandbox.aio.provisioner.image`
@@ -759,7 +754,7 @@ OPENMAIC_CODE_SANDBOX_AIO_BACKEND=docker|provisioner
 OPENMAIC_CODE_SANDBOX_AIO_IMAGE=enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
 OPENMAIC_CODE_SANDBOX_AIO_DOCKER_SOCKET=/var/run/docker.sock
 OPENMAIC_CODE_SANDBOX_AIO_SANDBOX_HOST=host.docker.internal
-OPENMAIC_CODE_SANDBOX_AIO_REPLICAS=3
+OPENMAIC_CODE_SANDBOX_AIO_SHARED_SANDBOX_ID=sandbox_aio_global
 OPENMAIC_CODE_SANDBOX_AIO_IDLE_TIMEOUT_SEC=600
 OPENMAIC_CODE_SANDBOX_AIO_WORKDIR_MOUNT_PATH=/workspace
 OPENMAIC_CODE_SANDBOX_AIO_PREVIEW_BASE_URL=http://localhost:3000/api/code-preview
@@ -780,11 +775,13 @@ OPENMAIC_CODE_SANDBOX_AIO_PROVISIONER_IMAGE=enterprise-public-cn-beijing.cr.volc
    - `provisioner`：OpenMAIC 通过 HTTP 调用 provisioner 管理容器或 Pod
 3. `aio.image`
    - `docker` 模式下用于直接启动沙箱容器镜像
-4. `aio.sandboxHost`
+4. `aio.sharedSandboxId`
+   - `aio` 模式下全局共享沙箱容器的稳定标识；同一服务实例内所有会话必须复用该标识对应的容器
+5. `aio.sandboxHost`
    - 容器内或后端容器访问沙箱暴露地址时使用的宿主名，参考 `deer-flow` 的 `host.docker.internal`
-5. `aio.previewBaseUrl`
+6. `aio.previewBaseUrl`
    - Web 预览代理入口基础地址，不允许前端自行拼接容器地址
-6. `aio.provisioner.*`
+7. `aio.provisioner.*`
    - 仅在 `aio.backend=provisioner` 时生效
    - 用于对接 `deer-flow` 同类 provisioner 服务的 URL、命名空间、kubeconfig 和镜像
 
@@ -848,7 +845,7 @@ OPENMAIC_CODE_SANDBOX_AIO_PROVISIONER_IMAGE=enterprise-public-cn-beijing.cr.volc
    - 重复运行
    - 停止运行
    - 释放会话
-   - idle timeout 自动回收
+   - 共享容器复用下的陈旧会话整形
 3. 运行结果
    - `stdout`
    - `stderr`
@@ -865,8 +862,7 @@ OPENMAIC_CODE_SANDBOX_AIO_PROVISIONER_IMAGE=enterprise-public-cn-beijing.cr.volc
    - 非法路径访问阻断
    - 非白名单网络访问阻断
 5. 容器编排
-   - 单容器单会话
-   - warm pool 复用
+   - 单共享容器多会话复用
    - 并发会话隔离
    - 容器异常退出后的恢复
    - provisioner 不可用时的错误传播

@@ -11,7 +11,7 @@ export interface CodeSandboxConfig {
     image: string;
     dockerSocketPath: string;
     sandboxHost: string;
-    replicas: number;
+    sharedSandboxId: string;
     idleTimeoutSec: number;
     workdirMountPath: string;
     previewBaseUrl: string;
@@ -53,7 +53,8 @@ export function getCodeSandboxConfig(): CodeSandboxConfig {
         process.env.OPENMAIC_CODE_SANDBOX_AIO_DOCKER_SOCKET || '/var/run/docker.sock',
       sandboxHost:
         process.env.OPENMAIC_CODE_SANDBOX_AIO_SANDBOX_HOST || 'host.docker.internal',
-      replicas: envNumber('OPENMAIC_CODE_SANDBOX_AIO_REPLICAS', 3),
+      sharedSandboxId:
+        process.env.OPENMAIC_CODE_SANDBOX_AIO_SHARED_SANDBOX_ID || 'sandbox_aio_global',
       idleTimeoutSec: envNumber('OPENMAIC_CODE_SANDBOX_AIO_IDLE_TIMEOUT_SEC', 600),
       workdirMountPath: process.env.OPENMAIC_CODE_SANDBOX_AIO_WORKDIR_MOUNT_PATH || '/workspace',
       previewBaseUrl:
@@ -81,6 +82,10 @@ export function getCodeSandboxWorkspaceRoot(config = getCodeSandboxConfig()) {
   return path.resolve(config.local.workspaceRoot);
 }
 
+export function getCodeSandboxAioSharedSandboxId(config = getCodeSandboxConfig()) {
+  return config.aio.sharedSandboxId.trim() || 'sandbox_aio_global';
+}
+
 export function validateCodeSandboxConfig(config = getCodeSandboxConfig()) {
   if (config.mode !== 'aio') {
     return config;
@@ -102,6 +107,9 @@ export function validateCodeSandboxConfig(config = getCodeSandboxConfig()) {
     throw new Error(
       'OPENMAIC_CODE_SANDBOX_AIO_WORKDIR_MOUNT_PATH is required when backend=docker',
     );
+  }
+  if (!config.aio.sharedSandboxId.trim()) {
+    throw new Error('OPENMAIC_CODE_SANDBOX_AIO_SHARED_SANDBOX_ID is required when mode=aio');
   }
   return config;
 }

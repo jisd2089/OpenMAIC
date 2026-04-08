@@ -146,7 +146,7 @@ codeSandbox:
     image: enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
     dockerSocketPath: /var/run/docker.sock
     sandboxHost: host.docker.internal
-    replicas: 3
+    sharedSandboxId: sandbox_aio_global
     idleTimeoutSec: 600
     workdirMountPath: /workspace
     previewBaseUrl: http://localhost:3000/api/code-preview
@@ -171,10 +171,10 @@ codeSandbox:
 4. `codeSandbox.aio.sandboxHost`
    - 对齐 `deer-flow` 中的 `DEER_FLOW_SANDBOX_HOST`
    - 用于后端容器访问宿主沙箱地址，默认 `host.docker.internal`
-5. `codeSandbox.aio.replicas`
-   - 最大并发沙箱容量，语义对齐 `deer-flow` 的 `replicas`
+5. `codeSandbox.aio.sharedSandboxId`
+   - 全局共享沙箱容器标识；同一 OpenMAIC 服务实例内所有浏览器客户端复用该容器
 6. `codeSandbox.aio.idleTimeoutSec`
-   - 空闲回收时间，语义对齐 `deer-flow` 的 `idle_timeout`
+   - 用于共享容器维护或陈旧会话整形，不再表达“每会话容器回收”
 7. `codeSandbox.aio.provisioner.url`
    - 与 `deer-flow` 的 `provisioner_url` 同语义
    - 非空时表示通过 provisioner 管理远程容器或 Kubernetes Pod
@@ -189,7 +189,7 @@ OPENMAIC_CODE_SANDBOX_AIO_BACKEND=docker|provisioner
 OPENMAIC_CODE_SANDBOX_AIO_IMAGE=enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
 OPENMAIC_CODE_SANDBOX_AIO_DOCKER_SOCKET=/var/run/docker.sock
 OPENMAIC_CODE_SANDBOX_AIO_SANDBOX_HOST=host.docker.internal
-OPENMAIC_CODE_SANDBOX_AIO_REPLICAS=3
+OPENMAIC_CODE_SANDBOX_AIO_SHARED_SANDBOX_ID=sandbox_aio_global
 OPENMAIC_CODE_SANDBOX_AIO_IDLE_TIMEOUT_SEC=600
 OPENMAIC_CODE_SANDBOX_AIO_WORKDIR_MOUNT_PATH=/workspace
 OPENMAIC_CODE_SANDBOX_AIO_PREVIEW_BASE_URL=http://localhost:3000/api/code-preview
@@ -274,8 +274,8 @@ OPENMAIC_CODE_SANDBOX_AIO_PROVISIONER_IMAGE=enterprise-public-cn-beijing.cr.volc
    - 停止运行后可再次运行
    - 保存草稿后恢复会话内容一致
    - 会话释放后再次查询返回已释放状态或明确错误
-   - idle timeout 后容器自动回收
-   - `release` 后进入 warm pool，可被同一作用域快速复用
+   - idle timeout 后陈旧会话可被整形回 `ready`
+   - `release` 后只释放会话状态，不停止共享容器
    - `destroy` 后再次访问必须触发重新创建
 3. 结果与预览测试
    - `stdout` / `stderr` 正确返回
@@ -298,11 +298,11 @@ OPENMAIC_CODE_SANDBOX_AIO_PROVISIONER_IMAGE=enterprise-public-cn-beijing.cr.volc
    - 上传文件路径规范化后无路径穿越
    - 符号链接文件不会被错误赋权或同步
 6. 容器编排测试
-   - 并发多会话时容器与工作目录隔离
-   - warm pool 复用时旧会话数据不会泄漏
+   - 并发多会话时共享容器复用与工作目录隔离
+   - 不同会话在同一共享容器内运行时旧会话数据不会泄漏
    - 容器异常退出后再次运行能正确报错或自动恢复
    - provisioner / runtime 不可用时接口错误码和错误信息稳定
-   - 同一稳定 `sandboxId` 并发创建时不会产生重复容器冲突
+   - 同一稳定 `sandboxId` 并发创建时不会产生重复共享容器冲突
    - 进程重启后可重新发现既有 sandbox
 7. 课堂集成测试
    - 打开代码编辑器不影响幻灯片播放、暂停恢复和 PPT 指示效果
@@ -419,7 +419,7 @@ OPENMAIC_CODE_SANDBOX_AIO_PROVISIONER_IMAGE=enterprise-public-cn-beijing.cr.volc
 2. `OPENMAIC_CODE_SANDBOX_AIO_BACKEND`
 3. `OPENMAIC_CODE_SANDBOX_AIO_IMAGE`
 4. `OPENMAIC_CODE_SANDBOX_AIO_SANDBOX_HOST`
-5. `OPENMAIC_CODE_SANDBOX_AIO_REPLICAS`
+5. `OPENMAIC_CODE_SANDBOX_AIO_SHARED_SANDBOX_ID`
 6. `OPENMAIC_CODE_SANDBOX_AIO_IDLE_TIMEOUT_SEC`
 7. 若使用 provisioner，还必须确认：
    - `OPENMAIC_CODE_SANDBOX_AIO_PROVISIONER_URL`
@@ -454,7 +454,7 @@ OPENMAIC_CODE_SANDBOX_AIO_PROVISIONER_IMAGE=enterprise-public-cn-beijing.cr.volc
 8. `provisioner` 模式下 kubeconfig 和命名空间配置有效
 9. 预览代理到沙箱容器或预览产物目录的路由可访问
 10. 反向代理不会暴露原始容器端口给浏览器
-11. 同一作用域重复打开编辑器时，可复用 warm pool 或已发现的 sandbox
+11. 同一服务实例内重复打开编辑器时，必须复用全局共享 sandbox
 12. 应用重启后仍能根据稳定 `sandboxId` 发现既有 sandbox，或明确回收并重建
 
 `docker compose` 示例：
@@ -468,7 +468,7 @@ services:
       - OPENMAIC_CODE_SANDBOX_AIO_IMAGE=enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
       - OPENMAIC_CODE_SANDBOX_AIO_DOCKER_SOCKET=/var/run/docker.sock
       - OPENMAIC_CODE_SANDBOX_AIO_SANDBOX_HOST=host.docker.internal
-      - OPENMAIC_CODE_SANDBOX_AIO_REPLICAS=3
+      - OPENMAIC_CODE_SANDBOX_AIO_SHARED_SANDBOX_ID=sandbox_aio_global
       - OPENMAIC_CODE_SANDBOX_AIO_IDLE_TIMEOUT_SEC=600
       - OPENMAIC_CODE_SANDBOX_AIO_WORKDIR_MOUNT_PATH=/workspace
       - OPENMAIC_CODE_SANDBOX_AIO_PREVIEW_BASE_URL=http://localhost:3000/api/code-preview

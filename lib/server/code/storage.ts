@@ -77,6 +77,10 @@ export function buildStableCodeSessionId(input: {
     .slice(0, 16);
 }
 
+export function buildSharedAioSandboxId(sharedSandboxId: string) {
+  return sharedSandboxId.trim() || 'sandbox_aio_global';
+}
+
 export function buildStableSandboxId(input: {
   classroomId: string;
   sceneId: string;

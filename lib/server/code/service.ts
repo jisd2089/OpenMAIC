@@ -1,8 +1,10 @@
 import type { CodeLanguage } from '@/lib/code/runtime-catalog';
 import { createDefaultCodeFiles, getCodeLanguageCatalogEntry } from '@/lib/code/runtime-catalog';
+import { getCodeSandboxAioSharedSandboxId } from '@/lib/server/code/config';
 import { getClassroomCodeSandboxProvider } from '@/lib/server/code/provider';
 import { getCodeRuntimeAvailability, listSupportedCodeRuntimes } from '@/lib/server/code/runtime-registry';
 import {
+  buildSharedAioSandboxId,
   buildStableCodeSessionId,
   buildStableSandboxId,
   readCodeExecution,
@@ -58,6 +60,10 @@ export async function createOrRestoreCodeSession(input: {
   const sessionId = buildStableCodeSessionId(input);
   const provider = getClassroomCodeSandboxProvider();
   const providerMode = provider.mode;
+  const sandboxId =
+    providerMode === 'aio'
+      ? buildSharedAioSandboxId(getCodeSandboxAioSharedSandboxId())
+      : buildStableSandboxId(input);
   const existing = await readCodeSession(input.classroomId, sessionId);
   if (existing) {
     const normalizedLanguage = getCodeRuntimeAvailability(existing.language)?.available
@@ -71,6 +77,7 @@ export async function createOrRestoreCodeSession(input: {
     const session: PersistedCodeSession = {
       ...existing,
       providerMode,
+      sandboxId,
       language: normalizedLanguage,
       entrypoint:
         normalizedLanguage !== existing.language
@@ -100,7 +107,7 @@ export async function createOrRestoreCodeSession(input: {
     clientSessionId: input.clientSessionId,
     view: input.view,
     providerMode,
-    sandboxId: buildStableSandboxId(input),
+    sandboxId,
     language,
     entrypoint: defaultFiles[0].path,
     stdin: '',

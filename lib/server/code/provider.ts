@@ -7,6 +7,7 @@ import { getCodeLanguageCatalogEntry } from '@/lib/code/runtime-catalog';
 import { createLogger } from '@/lib/logger';
 import {
   getCodeSandboxConfig,
+  getCodeSandboxWorkspaceRoot,
   type CodeSandboxConfig,
   validateCodeSandboxConfig,
 } from '@/lib/server/code/config';
@@ -282,30 +283,12 @@ export async function sweepIdleAioSandboxSessions(config = validateCodeSandboxCo
       continue;
     }
 
-    const containerName = sandboxContainerName(session.sandboxId);
-    if (!isDockerContainerRunning(containerName, config)) {
-      if (session.status !== 'ready' && session.status !== 'released') {
-        await writeCodeSession({
-          ...session,
-          status: 'ready',
-          updatedAt: new Date().toISOString(),
-        });
-      }
-      continue;
-    }
-
-    try {
-      runDockerControlCommand(['stop', containerName], config);
-      log.info(`Stopped idle AIO sandbox container ${containerName}`);
-      if (session.status !== 'released') {
-        await writeCodeSession({
-          ...session,
-          status: 'ready',
-          updatedAt: new Date().toISOString(),
-        });
-      }
-    } catch (error) {
-      log.warn(`Failed to stop idle AIO sandbox container ${containerName}:`, error);
+    if (session.status === 'running' && lastExecution && isTerminalExecutionStatus(lastExecution.status)) {
+      await writeCodeSession({
+        ...session,
+        status: 'ready',
+        updatedAt: new Date().toISOString(),
+      });
     }
   }
 }
@@ -563,15 +546,26 @@ class DockerAioCodeSandboxProvider implements ClassroomCodeSandboxProvider {
   constructor(private readonly config: CodeSandboxConfig) {}
 
   private getSessionPaths(input: { classroomId: string; sessionId: string; sandboxId: string }) {
+    const hostWorkspaceRoot = getCodeSandboxWorkspaceRoot(this.config);
     const hostSessionDir = codeSessionDir(input.classroomId, input.sessionId);
     const currentContainerId = getCurrentContainerId();
-    const containerSessionDir = currentContainerId
-      ? hostSessionDir.replaceAll('\\', '/')
+    const containerRootDir = currentContainerId
+      ? hostWorkspaceRoot.replaceAll('\\', '/')
       : this.config.aio.workdirMountPath;
+    const containerSessionDir = joinPosix(
+      containerRootDir,
+      'classrooms',
+      input.classroomId,
+      'code',
+      'sessions',
+      input.sessionId,
+    );
 
     return {
+      hostWorkspaceRoot,
       hostSessionDir,
       currentContainerId,
+      containerRootDir,
       containerSessionDir,
       containerName: sandboxContainerName(input.sandboxId),
       containerWorkspaceDir: joinPosix(containerSessionDir, 'workspace'),
@@ -624,7 +618,7 @@ class DockerAioCodeSandboxProvider implements ClassroomCodeSandboxProvider {
       '--shm-size=1g',
       ...(paths.currentContainerId
         ? ['--volumes-from', paths.currentContainerId]
-        : ['-v', `${paths.hostSessionDir}:${paths.containerSessionDir}`]),
+        : ['-v', `${paths.hostWorkspaceRoot}:${paths.containerRootDir}`]),
       this.config.aio.image,
     ];
 
@@ -656,19 +650,8 @@ class DockerAioCodeSandboxProvider implements ClassroomCodeSandboxProvider {
   }
 
   async releaseSession(input: { classroomId: string; session: PersistedCodeSession }) {
-    if (!input.session.sandboxId) {
-      return;
-    }
-    const containerName = sandboxContainerName(input.session.sandboxId);
-    if (!isDockerContainerRunning(containerName, this.config)) {
-      return;
-    }
-    try {
-      runDockerControlCommand(['stop', containerName], this.config);
-      log.info(`Stopped AIO sandbox container ${containerName}`);
-    } catch (error) {
-      log.warn(`Failed to stop AIO sandbox container ${containerName}:`, error);
-    }
+    void input.classroomId;
+    void input.session;
   }
 
   async runSession(input: {
