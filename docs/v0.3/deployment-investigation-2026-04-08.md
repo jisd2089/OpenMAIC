@@ -137,3 +137,40 @@
 1. 如果远程服务端仍未配置可用 TTS，系统不会凭空生成 `audioUrl`
 2. 因此，“生成链路自动持久化课堂”已经修复，但“远程部署下新课堂默认有声音”仍然依赖部署侧补齐 TTS
 3. 也就是说，代码侧现在已经能更早暴露问题、并避免课堂只落本地；但部署侧仍需完成 `TTS_*` 或 `server-providers.yml` 配置
+
+## 2026-04-08 二次复查结果
+
+重新部署后仍复现“无声音”和“代码工作台未运行”，继续排查后，确认还有两条未闭环：
+
+1. 课堂生成阶段此前仍然只认当前前端所选的 `ttsProviderId`
+   - 只要用户设置保留在 `browser-native-tts`，即使服务端已经配置了可用 TTS，生成链路也会直接跳过课堂音频生成
+   - 这会导致课堂数据里没有 `audioUrl`，浏览器网络层也不会请求 `/api/classroom-media/.../audio/...`
+2. 仓库根目录的 `docker-compose.yml` 此前只挂载了 Docker socket，但没有显式把代码沙箱切到 `aio`
+   - 当前 `lib/server/code/config.ts` 默认模式仍是 `local`
+   - 因此在远程 Docker Compose 部署下，服务端不会按预期去启动独立 sandbox 容器
+
+## 2026-04-08 二次修复
+
+本轮又补了四项修正：
+
+1. `lib/audio/classroom-tts.ts`
+   - 新增统一的课堂 TTS 选择逻辑
+   - 当当前设置是 `browser-native-tts`，但服务端存在可用 TTS provider 时，课堂生成会自动回退到服务端 TTS，而不是直接跳过
+2. `app/generation-preview/page.tsx` 与 `lib/hooks/use-scene-generator.ts`
+   - 首屏生成和课堂页续生成都改为复用统一的课堂 TTS 选择逻辑
+   - 这样服务端 TTS 已配置时，即使用户前端仍停留在浏览器朗读模式，也能为课堂实际生成音频
+3. `app/classroom/[id]/page.tsx`
+   - 课堂页加载后会补做一次“资产上传 + 课堂持久化”的自愈同步
+   - 后续场景继续生成时，也会后台同步到服务端，避免老课堂或续生成课堂继续只存在浏览器本地
+4. `docker-compose.yml`
+   - 远程部署默认显式设置 `OPENMAIC_CODE_SANDBOX_MODE=aio`
+   - 同时补齐 docker backend、sandbox image、socket 路径和 preview base URL，避免挂了 socket 但仍落回 `local` 模式
+
+## 当前判断更新
+
+1. “浏览器客户端无声音”除了部署侧缺少 TTS 外，还可能是前端课堂生成逻辑仍停留在 `browser-native-tts`
+2. “代码工作台未运行、服务端沙箱容器未启动”除了课堂未持久化外，还可能是 compose 部署根本没有把代码沙箱切到 `aio`
+3. 经过本轮修复后：
+   - 课堂生成会优先使用可用的服务端 TTS 生成课堂音频
+   - 课堂页会补同步本地课堂到服务端
+   - 远程 compose 部署会默认进入 Docker AIO 沙箱模式

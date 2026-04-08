@@ -59,6 +59,7 @@ import { SpeechButton } from '@/components/audio/speech-button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DEFAULT_SCOPE_ID } from '@/lib/constants/scope';
 import { buildGenerationSessionStorage } from '@/lib/generation/session-storage';
+import { resolveClassroomTTSConfig } from '@/lib/audio/classroom-tts';
 import type { KnowledgeBaseSummary } from '@/lib/server/kb/contracts';
 import type { MemoryNoteSummary } from '@/lib/server/memory/contracts';
 import { buildClassroomPath } from '@/lib/classroom/view';
@@ -121,6 +122,8 @@ function HomePage() {
   const currentModelId = useSettingsStore((s) => s.modelId);
   const ttsEnabled = useSettingsStore((s) => s.ttsEnabled);
   const ttsProviderId = useSettingsStore((s) => s.ttsProviderId);
+  const ttsVoice = useSettingsStore((s) => s.ttsVoice);
+  const ttsSpeed = useSettingsStore((s) => s.ttsSpeed);
   const ttsProvidersConfig = useSettingsStore((s) => s.ttsProvidersConfig);
   const [recentOpen, setRecentOpen] = useState(true);
 
@@ -654,44 +657,32 @@ function HomePage() {
   const audioGenerationWarning = useMemo(() => {
     if (!ttsEnabled) return null;
 
-    const selectedTtsProvider = ttsProvidersConfig?.[ttsProviderId];
-    const hasSelectedApiKey = !!selectedTtsProvider?.apiKey?.trim();
-    const hasSelectedServerConfig = selectedTtsProvider?.isServerConfigured === true;
+    const effectiveTTS = resolveClassroomTTSConfig({
+      ttsEnabled,
+      ttsProviderId,
+      ttsVoice,
+      ttsSpeed,
+      ttsProvidersConfig,
+    });
 
-    if (ttsProviderId === 'browser-native-tts') {
+    if (!effectiveTTS) {
       return locale === 'zh-CN'
         ? {
-            title: '当前不会在服务端预生成课程音频',
+            title: '当前没有可用的课堂语音生成器',
             description:
-              '你现在使用的是浏览器朗读。新建课程时不会写入可持久化的音频文件，远程 Docker 部署下换一台浏览器或打开代码工作台时，通常不会有现成声音可播。',
+              '虽然已开启课程语音，但当前既没有可用的服务端 TTS，也没有可用的本地 API Key。新建课程时会直接跳过音频生成。',
             actionLabel: '打开语音设置',
           }
         : {
-            title: 'Course audio will not be pre-generated on the server',
+            title: 'No classroom TTS provider is currently available',
             description:
-              'The current TTS mode uses browser-native speech. New courses will not get persisted audio files, so remote Docker deployments usually have no reusable audio when opened from another browser or the code workbench.',
-            actionLabel: 'Open audio settings',
-          };
-    }
-
-    if (!hasSelectedApiKey && !hasSelectedServerConfig) {
-      return locale === 'zh-CN'
-        ? {
-            title: '当前 TTS 提供商没有可用凭据',
-            description:
-              '虽然已开启课程语音，但所选 TTS 既没有本地 API Key，也没有服务端配置。新建课程时会直接跳过语音生成。',
-            actionLabel: '打开语音设置',
-          }
-        : {
-            title: 'The selected TTS provider has no usable credentials',
-            description:
-              'Course speech is enabled, but the selected TTS provider has neither a local API key nor a server-side configuration. New courses will skip audio generation.',
+              'Course speech is enabled, but there is no usable server-side TTS and no usable local API key. New courses will skip audio generation.',
             actionLabel: 'Open audio settings',
           };
     }
 
     return null;
-  }, [locale, ttsEnabled, ttsProviderId, ttsProvidersConfig]);
+  }, [locale, ttsEnabled, ttsProviderId, ttsProvidersConfig, ttsSpeed, ttsVoice]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {

@@ -6,6 +6,13 @@ services:
       - "3000:3000"
     env_file:
       - .env.local
+    environment:
+      OPENMAIC_CODE_SANDBOX_MODE: aio
+      OPENMAIC_CODE_SANDBOX_AIO_BACKEND: docker
+      OPENMAIC_CODE_SANDBOX_AIO_IMAGE: ${OPENMAIC_CODE_SANDBOX_AIO_IMAGE:-openmaic-sandbox:20260404}
+      OPENMAIC_CODE_SANDBOX_AIO_DOCKER_SOCKET: /var/run/docker.sock
+      OPENMAIC_CODE_SANDBOX_AIO_WORKDIR_MOUNT_PATH: /workspace
+      OPENMAIC_CODE_SANDBOX_AIO_PREVIEW_BASE_URL: ${OPENMAIC_CODE_SANDBOX_AIO_PREVIEW_BASE_URL:-http://localhost:3000/api/code-preview}
     volumes:
       # Optional: mount server-providers.yml for provider config
       # - ./server-providers.yml:/app/server-providers.yml:ro

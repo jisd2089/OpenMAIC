@@ -114,9 +114,22 @@ function normalizeDraft(next: CodeDraftState): CodeDraftState {
 }
 
 async function parseJsonResponse(response: Response) {
-  const payload = await response.json();
+  let payload: Record<string, unknown> | null = null;
+  let fallbackMessage = '';
+
+  try {
+    payload = (await response.json()) as Record<string, unknown>;
+  } catch {
+    fallbackMessage = (await response.text().catch(() => '')).trim();
+  }
+
   if (!response.ok || payload?.success === false) {
-    throw new Error(payload?.error || payload?.message || 'Request failed');
+    throw new Error(
+      (typeof payload?.error === 'string' && payload.error) ||
+        (typeof payload?.message === 'string' && payload.message) ||
+        fallbackMessage ||
+        `Request failed: HTTP ${response.status}`,
+    );
   }
   return payload;
 }

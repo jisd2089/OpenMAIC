@@ -31,6 +31,8 @@ import {
   mergeGenerationContextSummary,
 } from '@/lib/context/generation-context';
 import { buildClassroomPath, normalizeClassroomView } from '@/lib/classroom/view';
+import { prepareCoursePackageAssets } from '@/lib/classroom/prepare-course-package-assets';
+import { ensureClassroomPersisted } from '@/lib/classroom/ensure-classroom-persisted';
 
 const log = createLogger('Classroom');
 
@@ -60,10 +62,87 @@ export default function ClassroomDetailPage() {
   const [contextOpen, setContextOpen] = useState(false);
 
   const generationStartedRef = useRef(false);
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncInFlightRef = useRef(false);
+  const pendingSyncReasonRef = useRef<string | null>(null);
+
+  const syncClassroomDraftToServer = useCallback(
+    async (operation: string) => {
+      if (syncInFlightRef.current) {
+        pendingSyncReasonRef.current = operation;
+        return;
+      }
+
+      syncInFlightRef.current = true;
+      try {
+        const currentState = useStageStore.getState();
+        if (!currentState.stage || currentState.scenes.length === 0) {
+          return;
+        }
+
+        let scenesToPersist = currentState.scenes;
+        try {
+          scenesToPersist = await prepareCoursePackageAssets({
+            classroomId,
+            scenes: currentState.scenes,
+          });
+          useStageStore.getState().setScenes(scenesToPersist);
+          await useStageStore.getState().saveToStorage();
+        } catch (assetError) {
+          log.warn('[Classroom] Failed to upload classroom assets before sync:', {
+            classroomId,
+            operation,
+            error: assetError,
+          });
+        }
+
+        await ensureClassroomPersisted({
+          classroomId,
+          stage: currentState.stage,
+          scenes: scenesToPersist,
+          operation,
+        });
+      } catch (syncError) {
+        log.warn('[Classroom] Failed to sync classroom draft to server:', {
+          classroomId,
+          operation,
+          error: syncError,
+        });
+      } finally {
+        syncInFlightRef.current = false;
+        if (pendingSyncReasonRef.current) {
+          const nextOperation = pendingSyncReasonRef.current;
+          pendingSyncReasonRef.current = null;
+          void syncClassroomDraftToServer(nextOperation);
+        }
+      }
+    },
+    [classroomId],
+  );
+
+  const queueClassroomDraftSync = useCallback(
+    (operation: string) => {
+      pendingSyncReasonRef.current = operation;
+      if (syncTimerRef.current) {
+        clearTimeout(syncTimerRef.current);
+      }
+      syncTimerRef.current = setTimeout(() => {
+        const nextOperation = pendingSyncReasonRef.current || operation;
+        pendingSyncReasonRef.current = null;
+        syncTimerRef.current = null;
+        void syncClassroomDraftToServer(nextOperation);
+      }, 400);
+    },
+    [syncClassroomDraftToServer],
+  );
 
   const { generateRemaining, retrySingleOutline, stop } = useSceneGenerator({
+    onSceneGenerated: () => {
+      queueClassroomDraftSync('scene generation');
+    },
     onComplete: () => {
       log.info('[Classroom] All scenes generated');
+      queueClassroomDraftSync('generation complete');
     },
   });
 
@@ -204,13 +283,15 @@ export default function ClassroomDetailPage() {
             cleanIds && cleanIds.length > 0 ? cleanIds : ['default-1', 'default-2', 'default-3'],
           );
       }
+
+      await syncClassroomDraftToServer('classroom load');
     } catch (error) {
       log.error('Failed to load classroom:', error);
       setError(error instanceof Error ? error.message : 'Failed to load classroom');
     } finally {
       setLoading(false);
     }
-  }, [classroomId, loadFromStorage]);
+  }, [classroomId, loadFromStorage, syncClassroomDraftToServer]);
 
   const reloadClassroomFromServer = useCallback(async () => {
     const res = await fetch(`/api/classroom/${encodeURIComponent(classroomId)}`, {
@@ -273,6 +354,10 @@ export default function ClassroomDetailPage() {
 
     // Cancel ongoing generation when classroomId changes or component unmounts
     return () => {
+      if (syncTimerRef.current) {
+        clearTimeout(syncTimerRef.current);
+        syncTimerRef.current = null;
+      }
       stop();
     };
   }, [classroomId, loadClassroom, stop]);

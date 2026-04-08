@@ -11,6 +11,7 @@ import type { KnowledgeVideoReference } from '@/lib/kb/reference';
 import type { Scene } from '@/lib/types/stage';
 import type { SpeechAction } from '@/lib/types/action';
 import { splitLongSpeechActions } from '@/lib/audio/tts-utils';
+import { resolveClassroomTTSConfig } from '@/lib/audio/classroom-tts';
 import { generateMediaForOutlines } from '@/lib/media/media-orchestrator';
 import { createLogger } from '@/lib/logger';
 
@@ -135,20 +136,26 @@ export async function generateAndStoreTTS(
   signal?: AbortSignal,
 ): Promise<void> {
   const settings = useSettingsStore.getState();
-  if (settings.ttsProviderId === 'browser-native-tts') return;
+  const classroomTTS = resolveClassroomTTSConfig({
+    ttsEnabled: settings.ttsEnabled,
+    ttsProviderId: settings.ttsProviderId,
+    ttsVoice: settings.ttsVoice,
+    ttsSpeed: settings.ttsSpeed,
+    ttsProvidersConfig: settings.ttsProvidersConfig,
+  });
+  if (!classroomTTS) return;
 
-  const ttsProviderConfig = settings.ttsProvidersConfig?.[settings.ttsProviderId];
   const response = await fetch('/api/generate/tts', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       text,
       audioId,
-      ttsProviderId: settings.ttsProviderId,
-      ttsVoice: settings.ttsVoice,
-      ttsSpeed: settings.ttsSpeed,
-      ttsApiKey: ttsProviderConfig?.apiKey || undefined,
-      ttsBaseUrl: ttsProviderConfig?.baseUrl || undefined,
+      ttsProviderId: classroomTTS.providerId,
+      ttsVoice: classroomTTS.voice,
+      ttsSpeed: classroomTTS.speed,
+      ttsApiKey: classroomTTS.apiKey,
+      ttsBaseUrl: classroomTTS.baseUrl,
     }),
     signal,
   });
@@ -183,8 +190,18 @@ async function generateTTSForScene(
   scene: Scene,
   signal?: AbortSignal,
 ): Promise<{ success: boolean; failedCount: number; error?: string }> {
-  const providerId = useSettingsStore.getState().ttsProviderId;
-  scene.actions = splitLongSpeechActions(scene.actions || [], providerId);
+  const settings = useSettingsStore.getState();
+  const classroomTTS = resolveClassroomTTSConfig({
+    ttsEnabled: settings.ttsEnabled,
+    ttsProviderId: settings.ttsProviderId,
+    ttsVoice: settings.ttsVoice,
+    ttsSpeed: settings.ttsSpeed,
+    ttsProvidersConfig: settings.ttsProvidersConfig,
+  });
+  if (!classroomTTS) {
+    return { success: true, failedCount: 0 };
+  }
+  scene.actions = splitLongSpeechActions(scene.actions || [], classroomTTS.providerId);
   const speechActions = scene.actions.filter(
     (a): a is SpeechAction => a.type === 'speech' && !!a.text,
   );
@@ -202,7 +219,7 @@ async function generateTTSForScene(
       failedCount++;
       lastError = error instanceof Error ? error.message : `TTS failed for action ${action.id}`;
       log.warn('TTS generation failed:', {
-        providerId,
+        providerId: classroomTTS.providerId,
         actionId: action.id,
         textLength: action.text.length,
         error: lastError,

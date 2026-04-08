@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { useStageStore } from '@/lib/store/stage';
 import { useSettingsStore } from '@/lib/store/settings';
 import { useAgentRegistry } from '@/lib/orchestration/registry/store';
+import { resolveClassroomTTSConfig } from '@/lib/audio/classroom-tts';
 import { getAvailableProvidersWithVoices } from '@/lib/audio/voice-resolver';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import {
@@ -754,9 +755,15 @@ function GenerationPreviewContent() {
               : undefined,
         };
 
-        // Generate TTS for first scene (part of actions step - blocking)
-        if (settings.ttsEnabled && settings.ttsProviderId !== 'browser-native-tts') {
-        const ttsProviderConfig = settings.ttsProvidersConfig?.[settings.ttsProviderId];
+        // Generate classroom audio using the best available server-capable TTS provider.
+        const classroomTTS = resolveClassroomTTSConfig({
+          ttsEnabled: settings.ttsEnabled,
+          ttsProviderId: settings.ttsProviderId,
+          ttsVoice: settings.ttsVoice,
+          ttsSpeed: settings.ttsSpeed,
+          ttsProvidersConfig: settings.ttsProvidersConfig,
+        });
+        if (classroomTTS) {
         const speechActions = (data.scene.actions || []).filter(
           (a: { type: string; text?: string }) => a.type === 'speech' && a.text,
         );
@@ -772,11 +779,11 @@ function GenerationPreviewContent() {
               body: JSON.stringify({
                 text: action.text,
                 audioId,
-                ttsProviderId: settings.ttsProviderId,
-                ttsVoice: settings.ttsVoice,
-                ttsSpeed: settings.ttsSpeed,
-                ttsApiKey: ttsProviderConfig?.apiKey || undefined,
-                ttsBaseUrl: ttsProviderConfig?.baseUrl || undefined,
+                ttsProviderId: classroomTTS.providerId,
+                ttsVoice: classroomTTS.voice,
+                ttsSpeed: classroomTTS.speed,
+                ttsApiKey: classroomTTS.apiKey,
+                ttsBaseUrl: classroomTTS.baseUrl,
               }),
               signal,
             });
