@@ -36,10 +36,17 @@ export function runClassroomGenerationJob(
 
       await markClassroomGenerationJobSucceeded(jobId, result);
       if (isDifySyncConfigured(getDifyConfig())) {
-        void enqueueClassroomDifySync({
+        const difySync = await enqueueClassroomDifySync({
           classroomId: result.id,
           triggerSource: 'generate',
         });
+        if (difySync.status === 'failed') {
+          log.warn(`Dify sync failed after classroom generation for ${result.id}`, {
+            classroomId: result.id,
+            errorCode: difySync.errorCode,
+            errorMessage: difySync.errorMessage,
+          });
+        }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

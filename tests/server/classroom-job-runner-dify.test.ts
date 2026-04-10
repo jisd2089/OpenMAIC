@@ -20,6 +20,11 @@ describe('runClassroomGenerationJob dify trigger', () => {
     workspaceRoot = await setupIsolatedWorkspace('openmaic-classroom-job-dify-test-');
     generateClassroomMock.mockReset();
     enqueueDifySyncMock.mockReset();
+    enqueueDifySyncMock.mockResolvedValue({
+      status: 'completed',
+      errorCode: null,
+      errorMessage: null,
+    });
     process.env.OPENMAIC_DIFY_ENABLED = 'true';
     process.env.OPENMAIC_DIFY_BASE_URL = 'https://difytestapi.zhizuobiao.com/v1';
     process.env.OPENMAIC_DIFY_API_KEY = 'test-key';
@@ -71,5 +76,61 @@ describe('runClassroomGenerationJob dify trigger', () => {
       classroomId: 'cls_generated',
       triggerSource: 'generate',
     });
+  });
+
+  it('waits for dify sync to start before finishing the generation runner', async () => {
+    const { createClassroomGenerationJob } = await import('@/lib/server/classroom-job-store');
+    const { runClassroomGenerationJob } = await import('@/lib/server/classroom-job-runner');
+
+    generateClassroomMock.mockResolvedValue({
+      id: 'cls_wait_sync',
+      url: 'http://localhost/classroom/cls_wait_sync',
+      stage: { id: 'cls_wait_sync', name: 'Generated', createdAt: 1, updatedAt: 1 },
+      scenes: [],
+      scenesCount: 2,
+      createdAt: new Date().toISOString(),
+    });
+
+    let resolveSync: ((value: unknown) => void) | undefined;
+    const syncPromise = new Promise((resolve) => {
+      resolveSync = resolve;
+    });
+    enqueueDifySyncMock.mockImplementationOnce(() => syncPromise);
+
+    await createClassroomGenerationJob('job_wait_sync', {
+      type: 'course',
+      requirement: 'Teach fractions',
+      language: 'zh-CN',
+    });
+
+    let runnerFinished = false;
+    const runnerPromise = runClassroomGenerationJob(
+      'job_wait_sync',
+      {
+        type: 'course',
+        requirement: 'Teach fractions',
+        language: 'zh-CN',
+      },
+      'http://localhost',
+    ).then(() => {
+      runnerFinished = true;
+    });
+
+    await vi.waitFor(() =>
+      expect(enqueueDifySyncMock).toHaveBeenCalledWith({
+        classroomId: 'cls_wait_sync',
+        triggerSource: 'generate',
+      }),
+    );
+    expect(runnerFinished).toBe(false);
+
+    resolveSync?.({
+      status: 'completed',
+      errorCode: null,
+      errorMessage: null,
+    });
+
+    await runnerPromise;
+    expect(runnerFinished).toBe(true);
   });
 });

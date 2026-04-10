@@ -98,7 +98,19 @@ describe('classroom publish routes', () => {
       const url = String(input);
       const method = init?.method || 'GET';
 
+      if (url.endsWith('/datasets/dataset_1') && method === 'GET') {
+        return new Response(
+          JSON.stringify({
+            id: 'dataset_1',
+            indexing_technique: 'high_quality',
+          }),
+          { status: 200 },
+        );
+      }
+
       if (url.endsWith('/datasets/dataset_1/document/create-by-text') && method === 'POST') {
+        const body = JSON.parse(String(init?.body || '{}')) as { indexing_technique?: string };
+        expect(body.indexing_technique).toBe('high_quality');
         return new Response(
           JSON.stringify({
             document: {
@@ -286,7 +298,19 @@ describe('classroom publish routes', () => {
         return new Response(JSON.stringify({ message: 'not found' }), { status: 404 });
       }
 
+      if (url.endsWith('/datasets/dataset_1') && method === 'GET') {
+        return new Response(
+          JSON.stringify({
+            id: 'dataset_1',
+            indexing_technique: 'high_quality',
+          }),
+          { status: 200 },
+        );
+      }
+
       if (url.endsWith('/datasets/dataset_1/document/create-by-text') && method === 'POST') {
+        const body = JSON.parse(String(init?.body || '{}')) as { indexing_technique?: string };
+        expect(body.indexing_technique).toBe('high_quality');
         return new Response(
           JSON.stringify({
             document: {

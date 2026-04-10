@@ -91,7 +91,12 @@ export async function POST(req: NextRequest) {
     const job = await createClassroomGenerationJob(jobId, body);
     const pollUrl = `${baseUrl}/api/generate-classroom/${jobId}`;
 
-    after(() => runClassroomGenerationJob(jobId, body, baseUrl));
+    const startJob = () => runClassroomGenerationJob(jobId, body, baseUrl);
+
+    // Some deployments do not reliably flush next/server `after()` callbacks.
+    // Start immediately and keep `after()` as a fallback for runtimes that depend on it.
+    void startJob();
+    after(() => startJob());
 
     return apiSuccess(
       {

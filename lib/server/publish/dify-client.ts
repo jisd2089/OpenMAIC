@@ -18,6 +18,11 @@ export interface DifyIndexingStatusEntry {
   total_segments?: number;
 }
 
+interface DifyDatasetDetails {
+  id: string;
+  indexing_technique?: string;
+}
+
 export class DifyApiError extends Error {
   status: number;
   code: string;
@@ -63,6 +68,8 @@ async function readErrorPayload(response: Response): Promise<string> {
 }
 
 export class DifyClient {
+  private datasetPromise: Promise<DifyDatasetDetails> | null = null;
+
   constructor(private readonly config: DifyConfig) {}
 
   private async request<T>(pathname: string, init?: RequestInit): Promise<T> {
@@ -104,12 +111,26 @@ export class DifyClient {
     );
   }
 
+  async getDatasetDetails(): Promise<DifyDatasetDetails> {
+    if (!this.datasetPromise) {
+      this.datasetPromise = this.request<DifyDatasetDetails>(`/datasets/${this.config.datasetId}`);
+    }
+
+    return this.datasetPromise;
+  }
+
+  private async resolveIndexingTechnique() {
+    const dataset = await this.getDatasetDetails();
+    return dataset.indexing_technique || 'high_quality';
+  }
+
   async createDocumentByText(input: {
     name: string;
     text: string;
     separator: string;
     docLanguage?: string;
   }): Promise<{ documentId: string; documentName: string; createdAt: string | null; batch: string }> {
+    const indexingTechnique = await this.resolveIndexingTechnique();
     const payload = await this.request<DifyDocumentMutationResponse>(
       `/datasets/${this.config.datasetId}/document/create-by-text`,
       {
@@ -117,6 +138,7 @@ export class DifyClient {
         body: JSON.stringify({
           name: input.name,
           text: input.text,
+          indexing_technique: indexingTechnique,
           doc_form: 'text_model',
           ...(input.docLanguage ? { doc_language: input.docLanguage } : {}),
           process_rule: {
@@ -151,6 +173,7 @@ export class DifyClient {
     separator: string;
     docLanguage?: string;
   }): Promise<{ documentId: string; documentName: string; createdAt: string | null; batch: string }> {
+    const indexingTechnique = await this.resolveIndexingTechnique();
     const payload = await this.request<DifyDocumentMutationResponse>(
       `/datasets/${this.config.datasetId}/documents/${input.documentId}/update-by-text`,
       {
@@ -158,6 +181,7 @@ export class DifyClient {
         body: JSON.stringify({
           name: input.name,
           text: input.text,
+          indexing_technique: indexingTechnique,
           doc_form: 'text_model',
           ...(input.docLanguage ? { doc_language: input.docLanguage } : {}),
           process_rule: {
