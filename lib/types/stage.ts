@@ -24,6 +24,7 @@ export interface SelectedMemorySummary {
 }
 
 export interface GenerationContextSummary {
+  classroomType?: 'course' | 'knowledge';
   scopeId?: string;
   knowledgeBaseIds?: string[];
   memoryIds?: string[];

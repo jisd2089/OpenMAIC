@@ -22,6 +22,8 @@
 3. 课堂代码运行后端接口
 4. 运行时注册表和主流语言模板
 5. 基于 `LocalSandboxProvider` / `AioSandboxProvider` 的沙箱执行适配层
+6. 左侧 PPT 导航条改版为窄轨式场景导航
+7. 生成课件同步到 Dify 知识库指定文档
 
 约束：
 
@@ -52,6 +54,16 @@
    - 允许在同一右侧面板内切换为编辑优先或结果优先布局
    - 不允许直接复用旧的宽弹框三栏布局
 7. 小屏设备下的降级布局
+8. 左侧场景导航改版：
+   - 当前 `SceneSidebar` 不再以大缩略图列表为默认样式
+   - 改为固定窄轨 `SceneRail`
+   - 底部显示 `当前页 / 总页数`
+   - 节点 hover 时允许浮出轻量预览卡
+   - 不再提供自由拖拽调宽
+9. 课堂页中增加 Dify 同步状态提示入口：
+   - 至少可见“同步中 / 已完成 / 失败”
+   - 失败时提供手动重试入口
+   - 该状态提示不得阻塞课堂主画布交互
 
 前端与沙箱交互实现要求：
 
@@ -106,6 +118,10 @@
 4. 会话回收接口
 5. 代码沙箱提供者适配层
 6. 运行时注册表
+7. Dify 发布状态查询接口
+8. Dify 手动重试接口
+9. 课件序列化为 Dify 文本的发布模块
+10. Dify 后台轮询与状态持久化模块
 
 语言差异处理要求：
 
@@ -116,6 +132,66 @@
    - Python 沙箱服务负责什么
    - 两者的调用协议与超时策略
 4. `v0.3` 首版交付不采用 Python 独立服务模式，默认实现目标为 Node / TypeScript 单服务方案
+
+外部发布实现要求：
+
+1. Dify 同步只允许服务端调用，浏览器不直连 Dify
+2. 生成完成后的 Dify 发布必须异步执行，不阻塞课堂生成成功返回
+3. Dify 失败不允许回滚课堂持久化结果
+4. 当前本地知识库检索链路与 Dify 发布链路必须解耦
+5. `v0.3` 默认按固定 `datasetId + documentId` 更新单个目标文档，而不是为每个课堂自动新建 Dify 文档
+6. Dify 同步必须带上必要元数据：
+   - `classroom`
+   - `type`
+   - `title`
+7. `type` 必须从 `POST /api/generate-classroom` 请求字段 `type` 透传
+8. 课件内容必须按 PPT 页分段后再发布到 Dify
+9. 单段文本长度上限为 `4000` 字符
+10. 除生成完成自动触发外，还必须支持“课堂操作”-“发布”作为第二个触发点
+
+### 3.2.1 Dify 同步开发实现拆分
+
+建议按以下顺序实施，避免把同步逻辑直接塞进生成接口：
+
+1. 配置层
+   - 新增 `dify-config`，统一解析 `OPENMAIC_DIFY_*`
+   - 启动时校验 `baseUrl`、`datasetId`、`documentId`
+2. 客户端层
+   - 新增 `dify-client`
+   - 统一封装 `Authorization: Bearer ${OPENMAIC_DIFY_API_KEY}`
+   - 统一处理超时、重试、错误码分类
+3. 序列化层
+   - 新增 `classroom-dify-serializer`
+   - 输入课堂 JSON
+   - 输出按 PPT 页分段后的文本块与元数据
+4. 状态层
+   - 新增 `classroom-publish-store`
+   - 记录 `queued/syncing/indexing/completed/failed/skipped`
+   - 记录 `batchId`、`contentHash`、`triggerSource`
+5. 调度层
+   - 新增 `classroom-dify-sync`
+   - 提供 `enqueueAfterGenerate()` 和 `enqueueAfterPublish()`
+   - 后台执行 `update-by-text` 与 `indexing-status` 轮询
+6. 路由层
+   - `POST /api/generate-classroom` 成功持久化后只负责入队
+   - “课堂操作”-“发布”接口在保存成功后只负责入队
+   - `GET /api/classroom/:id/publish-status` 只读状态，不触发同步
+
+开发约束：
+
+1. 课堂生成成功响应不能等待 Dify 远端返回终态
+2. 同步任务必须基于服务端持久化后的课堂真值，而不是浏览器传回的临时对象
+3. API Key 只允许在服务端请求头中使用，不得进入浏览器返回值、日志明文或前端状态
+4. 日志中若打印配置，只允许打印 `baseUrl`、`datasetId`、`documentId`，不得打印 API Key
+5. `type` 必须在课堂生成入口进入课堂真值，并在后续发布链路中原样透传
+
+推荐日志点：
+
+1. `Dify Sync Enqueued`：记录 `classroomId`、`triggerSource`
+2. `Dify Sync Started`：记录 `classroomId`、`contentHash`
+3. `Dify Sync Update Accepted`：记录 `batchId`
+4. `Dify Sync Polling`：记录 `batchId`、`remoteIndexingStatus`
+5. `Dify Sync Completed` 或 `Dify Sync Failed`
 
 ### 3.3 部署配置
 
@@ -130,6 +206,15 @@
    - memory
    - cpu
    - output size
+6. Dify 发布配置：
+   - `publish.dify.enabled`
+   - `publish.dify.baseUrl`
+   - `publish.dify.apiKey`
+   - `publish.dify.datasetId`
+   - `publish.dify.documentId`
+   - `publish.dify.timeoutMs`
+   - `publish.dify.pollingIntervalMs`
+   - `publish.dify.maxPollingAttempts`
 
 配置项必须参照 `deer-flow` 的沙箱选择思路进行说明，并在 OpenMAIC 中固化为统一配置契约。
 
@@ -156,6 +241,17 @@ codeSandbox:
       kubeconfigPath: /root/.kube/config
       nodeHost: host.docker.internal
       image: enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+publish:
+  dify:
+    enabled: true
+    baseUrl: https://difytestapi.zhizuobiao.com/v1
+    apiKey: ${OPENMAIC_DIFY_API_KEY}
+    datasetId: 1d2405b1-910a-4820-b06a-ad61b377c1a1
+    documentId: 4d54b7ca-d170-482a-85b6-7be5222c1d50
+    documentName: OpenMAIC Courseware Sync
+    timeoutMs: 30000
+    pollingIntervalMs: 2000
+    maxPollingAttempts: 180
 ```
 
 字段说明：
@@ -198,6 +294,15 @@ OPENMAIC_CODE_SANDBOX_AIO_PROVISIONER_NAMESPACE=openmaic
 OPENMAIC_CODE_SANDBOX_AIO_PROVISIONER_KUBECONFIG_PATH=/root/.kube/config
 OPENMAIC_CODE_SANDBOX_AIO_PROVISIONER_NODE_HOST=host.docker.internal
 OPENMAIC_CODE_SANDBOX_AIO_PROVISIONER_IMAGE=enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+OPENMAIC_DIFY_ENABLED=true
+OPENMAIC_DIFY_BASE_URL=https://difytestapi.zhizuobiao.com/v1
+OPENMAIC_DIFY_API_KEY=
+OPENMAIC_DIFY_DATASET_ID=1d2405b1-910a-4820-b06a-ad61b377c1a1
+OPENMAIC_DIFY_DOCUMENT_ID=4d54b7ca-d170-482a-85b6-7be5222c1d50
+OPENMAIC_DIFY_DOCUMENT_NAME=OpenMAIC Courseware Sync
+OPENMAIC_DIFY_TIMEOUT_MS=30000
+OPENMAIC_DIFY_POLLING_INTERVAL_MS=2000
+OPENMAIC_DIFY_MAX_POLLING_ATTEMPTS=180
 ```
 
 配置选择规则：
@@ -227,6 +332,8 @@ OPENMAIC_CODE_SANDBOX_AIO_PROVISIONER_IMAGE=enterprise-public-cn-beijing.cr.volc
 4. `GET /api/classroom/:id/code-sessions/:sessionId/executions/:executionId` 返回执行结果
 5. `DELETE /api/classroom/:id/code-sessions/:sessionId` 释放会话
 6. `GET /api/code-preview/:previewToken` 仅返回受控预览，不泄露底层容器地址
+7. `GET /api/classroom/:id/publish-status` 返回 Dify 同步状态
+8. `POST /api/classroom/:id/publish/dify` 可触发手动重试
 
 ### 4.2 提供者测试
 
@@ -237,6 +344,231 @@ OPENMAIC_CODE_SANDBOX_AIO_PROVISIONER_IMAGE=enterprise-public-cn-beijing.cr.volc
 3. 两种模式下会话回收逻辑一致
 4. 两种模式下语言注册表映射一致
 5. 若使用 Python 独立服务模式，需额外覆盖 TypeScript <-> Python 协议兼容测试
+6. Dify 发布模块必须覆盖：
+   - 元数据 `classroom/type/title` 正确透传
+   - `type` 与课堂生成请求中的 `type` 一致
+   - 按 PPT 页分段输出
+   - 单段长度不超过 `4000`
+   - 内容哈希未变化时返回 `skipped`
+   - `update-by-text` 成功后写入 `batchId`
+   - `indexing-status` 轮询到 `completed`
+   - 401 / 403 / 404 / 429 / 5xx 分类失败
+
+### 4.2.1 Dify 联调测试案例
+
+以下联调案例基于当前环境：
+
+1. `OPENMAIC_DIFY_BASE_URL=https://difytestapi.zhizuobiao.com/v1`
+2. `OPENMAIC_DIFY_DATASET_ID=1d2405b1-910a-4820-b06a-ad61b377c1a1`
+3. `OPENMAIC_DIFY_DOCUMENT_ID=4d54b7ca-d170-482a-85b6-7be5222c1d50`
+4. `OPENMAIC_DIFY_API_KEY` 由部署环境注入，不在测试文档中明文展开
+
+联调前置检查：
+
+1. 服务端环境变量已注入 `OPENMAIC_DIFY_API_KEY`
+2. OpenMAIC 服务容器可访问 `https://difytestapi.zhizuobiao.com/v1`
+3. 指定 `datasetId` / `documentId` 由当前 API Key 授权
+4. 目标课堂可在服务端持久化并能通过 `GET /api/classroom?id=:id` 读取
+
+建议先做 Dify 直连冒烟：
+
+```bash
+curl -sS -H "Authorization: Bearer ${OPENMAIC_DIFY_API_KEY}" ^
+  "https://difytestapi.zhizuobiao.com/v1/datasets/1d2405b1-910a-4820-b06a-ad61b377c1a1/documents/4d54b7ca-d170-482a-85b6-7be5222c1d50"
+```
+
+预期：
+
+1. 返回 `200`
+2. 返回体中能识别目标 `documentId`
+3. 若返回 `401/403/404`，停止后续 OpenMAIC 联调，先修正环境权限
+
+案例 1：生成完成后自动触发同步
+
+1. 调用 `POST /api/generate-classroom` 创建一门新课堂，`type=knowledge`
+2. 等待课堂生成任务进入 `succeeded`
+3. 立刻调用 `GET /api/classroom/:id/publish-status`
+
+预期：
+
+1. 课堂生成成功返回不等待 Dify 完成
+2. `publish-status` 中存在 `provider=dify`
+3. `triggerSource=generate`
+4. 初始状态为 `queued`、`syncing` 或 `indexing`
+
+案例 2：元数据透传正确
+
+1. 选取课堂生成请求：
+   - `classroom=gJsjGFbKau`
+   - `type=knowledge`
+   - `title=C语言数据结构`
+2. 查询 `GET /api/classroom/:id/publish-status`
+
+预期：
+
+1. `metadata.classroom=gJsjGFbKau`
+2. `metadata.type=knowledge`
+3. `metadata.title=C语言数据结构`
+
+案例 3：按 PPT 页分段且单段不超过 4000 字
+
+1. 准备一个至少 5 页的课堂
+2. 其中至少 1 页包含较长文本，逼近或超过 4000 字
+3. 触发一次同步
+4. 查看 OpenMAIC 服务端生成的发布文本或调试日志
+
+预期：
+
+1. 正常页按“1 页 1 段”输出
+2. 超长页被切为“同页多片段”
+3. 任一片段长度都不超过 `4000`
+4. 片段标题保留页码和片段号
+
+案例 4：轮询到 completed
+
+1. 在自动同步或手动发布后，每隔 2 秒调用一次 `GET /api/classroom/:id/publish-status`
+2. 持续到终态
+
+预期：
+
+1. 状态流转为 `queued -> syncing -> indexing -> completed`
+2. `batchId` 在进入 `indexing` 后可见
+3. `lastSyncedAt` 在完成后被写入
+
+案例 5：“课堂操作”-“发布”手动触发
+
+1. 打开一个已持久化课堂
+2. 在“课堂操作”中点击“发布”
+3. 立即查询 `GET /api/classroom/:id/publish-status`
+
+预期：
+
+1. 服务端返回 `queued` 或 `skipped`
+2. `triggerSource=publish`
+3. 发布动作不阻塞课堂页继续使用
+
+案例 6：内容未变化时 skipped
+
+1. 在同一课堂不做任何修改的前提下，连续两次触发“发布”
+2. 第二次查询 `publish-status`
+
+预期：
+
+1. 第二次同步可返回 `skipped`
+2. 不产生新的远端写入批次，或服务端明确记录未发起更新
+
+案例 7：手动重试
+
+1. 先制造一次失败，例如临时使用错误 API Key 或不可达网络
+2. 恢复正确配置后调用 `POST /api/classroom/:id/publish/dify`
+
+预期：
+
+1. 首次状态进入 `failed`
+2. 手动重试后 `triggerSource=manual`
+3. 后续可重新推进到 `completed`
+
+案例 8：鉴权失败
+
+1. 将 `OPENMAIC_DIFY_API_KEY` 临时替换为无效值
+2. 触发一次同步
+
+预期：
+
+1. `publish-status` 最终为 `failed`
+2. 错误分类为 `401` 或 `403`
+3. 不影响课堂本地生成成功
+
+案例 9：目标文档不存在
+
+1. 临时修改 `OPENMAIC_DIFY_DOCUMENT_ID` 为不存在的值
+2. 触发一次同步
+
+预期：
+
+1. `publish-status` 最终为 `failed`
+2. 错误分类为 `404`
+3. 错误文案中可定位是远端 `documentId` 问题
+
+案例 10：接口限流或超时
+
+1. 将 `OPENMAIC_DIFY_TIMEOUT_MS` 下调至极小值，或在网络层注入延迟
+2. 连续触发多次发布
+
+预期：
+
+1. 服务端能记录超时或 `429`
+2. 状态进入 `failed`
+3. 后续允许手动重试，不会把课堂状态打坏
+
+案例 11：Dify 直连结果与 OpenMAIC 状态一致
+
+1. 在 OpenMAIC 返回 `batchId` 后，直接用 Dify API 查询该批次状态
+2. 同时查询 `GET /api/classroom/:id/publish-status`
+
+预期：
+
+1. 两边的 `indexing_status` 一致或语义一致
+2. OpenMAIC 的状态更新延迟在可接受范围内
+
+案例 12：联调验收完成条件
+
+1. 自动触发通过
+2. “课堂操作”-“发布”触发通过
+3. 元数据校验通过
+4. 分段和 4000 字限制通过
+5. 至少 1 次完整 `completed`
+6. 至少 1 次失败与手动重试恢复通过
+
+### 4.2.2 Dify 联调执行记录要求
+
+每次联调都应至少保留以下证据，便于复盘：
+
+1. OpenMAIC 请求参数
+   - `classroomId`
+   - `type`
+   - `title`
+   - 触发来源：`generate` 或 `publish`
+2. OpenMAIC 返回结果
+   - `POST /api/generate-classroom` 的成功响应
+   - `GET /api/classroom/:id/publish-status` 的状态变化截图或原始 JSON
+3. 服务端日志
+   - 入队日志
+   - `update-by-text` 调用日志
+   - `batchId` 记录
+   - `indexing-status` 轮询日志
+   - 终态日志
+4. Dify 侧结果
+   - 目标 `documentId`
+   - Dify `indexing-status`
+   - 若失败，记录 HTTP 状态码与错误体摘要
+
+建议联调输出模板：
+
+```md
+### Dify 联调记录
+
+- 日期：
+- 环境：
+- classroomId：
+- title：
+- type：
+- triggerSource：
+- contentHash：
+- batchId：
+- publish-status 终态：
+- remoteIndexingStatus：
+- 结果：
+- 异常摘要：
+```
+
+推荐专项案例补充：
+
+1. 生成接口透传 `type=course` 与 `type=knowledge` 各执行一次
+2. 同一课堂首次自动同步后，再通过“发布”触发一次修改同步
+3. 课堂页数为 1 页、5 页、20 页各做一次分段验证
+4. 超长单页验证时，检查第 `N` 页是否拆成 `第 N 页 / 片段 M`
+5. 发布成功后直接到 Dify 检查该文档是否可按页检索关键字
 
 配置选择测试必须补充：
 
@@ -427,6 +759,17 @@ OPENMAIC_CODE_SANDBOX_AIO_PROVISIONER_IMAGE=enterprise-public-cn-beijing.cr.volc
    - `OPENMAIC_CODE_SANDBOX_AIO_PROVISIONER_KUBECONFIG_PATH`
    - `OPENMAIC_CODE_SANDBOX_AIO_PROVISIONER_NODE_HOST`
 
+部署前还必须确认 Dify 发布配置：
+
+1. `OPENMAIC_DIFY_ENABLED`
+2. `OPENMAIC_DIFY_BASE_URL`
+3. `OPENMAIC_DIFY_API_KEY`
+4. `OPENMAIC_DIFY_DATASET_ID`
+5. `OPENMAIC_DIFY_DOCUMENT_ID`
+6. `OPENMAIC_DIFY_TIMEOUT_MS`
+7. `OPENMAIC_DIFY_POLLING_INTERVAL_MS`
+8. 目标文档支持当前分段策略，且不会因默认清洗规则破坏页级边界
+
 还必须确认服务端工作区配置：
 
 1. `workspaceRoot` 在宿主机或容器内可持久化
@@ -456,6 +799,133 @@ OPENMAIC_CODE_SANDBOX_AIO_PROVISIONER_IMAGE=enterprise-public-cn-beijing.cr.volc
 10. 反向代理不会暴露原始容器端口给浏览器
 11. 同一服务实例内重复打开编辑器时，必须复用全局共享 sandbox
 12. 应用重启后仍能根据稳定 `sandboxId` 发现既有 sandbox，或明确回收并重建
+
+若开启 Dify 同步，还需检查：
+
+1. OpenMAIC 容器可以访问 `https://difytestapi.zhizuobiao.com/v1`
+2. 指定 `datasetId` 与 `documentId` 在当前 API Key 权限范围内可读写
+3. 生成课堂后 Dify 状态从 `queued` 能推进到 `completed` 或明确失败
+4. Dify 失败不会影响课堂本地生成成功
+5. 手动重试接口在失败后可重新触发同步
+6. “课堂操作”-“发布”在课堂持久化成功后能异步触发一次新的 Dify 更新
+7. 远端知识库中的内容能按 PPT 页检索，且单段不超过 `4000` 字符
+
+## 5. Dify “一课一文档”实施补充
+
+本节覆盖正文中所有“固定 `documentId`”实现假设。新的实现基线是：每个课堂创建并维护自己的 Dify 文档。
+
+### 5.1 开发实现补充
+
+1. 配置层不再要求 `OPENMAIC_DIFY_DOCUMENT_ID`
+2. 新增 `OPENMAIC_DIFY_DOCUMENT_NAME_TEMPLATE`
+3. 同步服务必须支持两条分支：
+   - `create`: 当前课堂无 `documentId`
+   - `update`: 当前课堂已有 `documentId`
+4. 首次成功创建后，必须把 `documentId`、`documentName`、`documentCreatedAt` 写回本地 `publish-status`
+5. 若更新时远端返回 `404`，必须自动切到 `create` 分支补建新文档
+6. 日志必须明确区分：
+   - `Dify Document Create Started`
+   - `Dify Document Create Accepted`
+   - `Dify Document Update Started`
+   - `Dify Document Recreated After Missing`
+
+### 5.2 部署配置补充
+
+推荐配置：
+
+```bash
+OPENMAIC_DIFY_ENABLED=true
+OPENMAIC_DIFY_BASE_URL=https://difytestapi.zhizuobiao.com/v1
+OPENMAIC_DIFY_API_KEY=
+OPENMAIC_DIFY_DATASET_ID=1d2405b1-910a-4820-b06a-ad61b377c1a1
+OPENMAIC_DIFY_DOCUMENT_NAME_TEMPLATE=[{type}] {title} ({classroom})
+OPENMAIC_DIFY_TIMEOUT_MS=30000
+OPENMAIC_DIFY_POLLING_INTERVAL_MS=2000
+OPENMAIC_DIFY_MAX_POLLING_ATTEMPTS=180
+```
+
+部署约束：
+
+1. 不再预置 `OPENMAIC_DIFY_DOCUMENT_ID`
+2. Dify API Key 只允许存在于服务端环境变量
+3. 首次同步成功后，远端文档 ID 由运行时自动生成并持久化
+
+### 5.3 联调测试案例补充
+
+以下用例用于替代旧的“固定文档”联调验证。
+
+案例 A：首次生成自动创建独立文档
+
+1. 调用 `POST /api/generate-classroom`
+2. 等待课堂生成成功
+3. 查询 `GET /api/classroom/:id/publish-status`
+4. 再调用 Dify `GET /datasets/{dataset_id}/documents`
+
+预期：
+
+1. `publish-status.documentId` 最终非空
+2. `documentName` 符合命名模板
+3. Dify documents 列表中新增一条该课堂专属文档
+4. 文档数量相较联调前增加 1
+
+案例 B：同一课堂二次发布复用原文档
+
+1. 记录首次同步后的 `documentId`
+2. 修改课堂内容后触发“发布”
+3. 查询 `GET /api/classroom/:id/publish-status`
+
+预期：
+
+1. 第二次同步仍返回同一个 `documentId`
+2. 状态推进到 `completed` 或明确失败
+3. Dify documents 列表中不会新增第二个同课堂文档
+
+案例 C：同名不同课堂互不覆盖
+
+1. 创建课堂 A，标题为 `高等数学`
+2. 创建课堂 B，标题也为 `高等数学`
+3. 分别等待同步完成
+
+预期：
+
+1. 两个课堂拥有不同 `documentId`
+2. 两条文档记录都能在 Dify 列表中看到
+3. 文档名可依靠 `classroomId` 尾缀区分
+
+案例 D：远端文档丢失后的自动补建
+
+1. 先完成一门课的首次同步
+2. 在 Dify 侧手工删除该文档
+3. 回到 OpenMAIC 对该课堂再次执行“发布”
+
+预期：
+
+1. 更新分支先检测到旧 `documentId` 无效
+2. 服务端自动创建新文档
+3. `publish-status.documentId` 被替换为新值
+4. 最终同步仍可进入 `completed`
+
+案例 E：列表可见性验收
+
+1. 连续生成 3 门不同课堂
+2. 等待三者同步完成
+3. 打开 Dify documents 页面或调用列表接口
+
+预期：
+
+1. 能看到 3 条新增课程文档
+2. 每条文档的 metadata 都包含 `classroom`、`type`、`title`
+3. 每条文档内容都能按 PPT 页检索
+
+### 5.4 联调记录补充字段
+
+联调记录除原字段外，还必须新增：
+
+1. `documentId(before)` 与 `documentId(after)`
+2. `documentName`
+3. `create-or-update`
+4. `difyDocumentsCountBefore`
+5. `difyDocumentsCountAfter`
 
 `docker compose` 示例：
 

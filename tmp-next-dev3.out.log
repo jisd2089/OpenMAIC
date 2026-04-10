@@ -1,0 +1,44 @@
+
+> openmaic@0.1.0 dev D:\github\OpenMAIC
+> next dev "--port" "3001"
+
+▲ Next.js 16.1.2 (Turbopack)
+- Local:         http://localhost:3001
+- Network:       http://10.11.20.50:3001
+- Environments: .env.local
+- Experiments (use with caution):
+  · proxyClientMaxBodySize: "200mb"
+
+✓ Starting...
+Creating turbopack project { dir: 'D:\\github\\OpenMAIC', testMode: true }
+✓ Ready in 23.7s
+○ Compiling /classroom/[id] ...
+ GET /classroom/_iYWD828P4?view=teacher 200 in 11.9s (compile: 10.6s, render: 1322ms)
+[2026-04-10T07:15:34.325Z] [INFO] [ServerProviderConfig] [ServerProviderConfig] Loaded (server-providers.yml): 1 LLM, 1 TTS, 1 ASR, 1 PDF, 1 Image, 0 Video, 1 WebSearch providers
+ GET /api/server-providers 200 in 1638ms (compile: 1609ms, render: 29ms)
+[2026-04-10T07:15:34.984Z] [INFO] [ClassroomPatch] Creating draft classroom from PATCH payload {"classroomId":"_iYWD828P4","saveMode":"draft","sceneCount":5}
+ PATCH /api/classroom/_iYWD828P4 200 in 2.2s (compile: 2.2s, render: 33ms)
+○ Compiling /api/classroom/[id]/code-sessions ...
+ POST /api/classroom/_iYWD828P4/code-sessions 500 in 11.7s (compile: 9.0s, render: 2.7s)
+ GET /classroom/_iYWD828P4?view=teacher 200 in 1529ms (compile: 680ms, render: 849ms)
+ GET /api/server-providers 200 in 13ms (compile: 6ms, render: 7ms)
+ PATCH /api/classroom/_iYWD828P4 200 in 50ms (compile: 33ms, render: 17ms)
+ POST /api/classroom/_iYWD828P4/code-sessions 500 in 2.3s (compile: 41ms, render: 2.2s)
+ GET /classroom/_iYWD828P4?view=teacher 200 in 121ms (compile: 38ms, render: 83ms)
+ GET /api/server-providers 200 in 12ms (compile: 4ms, render: 8ms)
+ PATCH /api/classroom/_iYWD828P4 200 in 40ms (compile: 26ms, render: 14ms)
+ POST /api/classroom/_iYWD828P4/code-sessions 500 in 4.3s (compile: 33ms, render: 4.2s)
+ GET /classroom/_iYWD828P4?view=teacher 200 in 925ms (compile: 280ms, render: 645ms)
+ GET /api/server-providers 200 in 11ms (compile: 4ms, render: 7ms)
+ PATCH /api/classroom/_iYWD828P4 200 in 50ms (compile: 33ms, render: 17ms)
+ POST /api/classroom/_iYWD828P4/code-sessions 500 in 2.3s (compile: 42ms, render: 2.3s)
+ GET /classroom/_iYWD828P4?view=teacher 200 in 360ms (compile: 149ms, render: 212ms)
+ GET /api/server-providers 200 in 55ms (compile: 25ms, render: 30ms)
+ PATCH /api/classroom/_iYWD828P4 200 in 122ms (compile: 54ms, render: 68ms)
+ POST /api/classroom/_iYWD828P4/code-sessions 500 in 2.2s (compile: 57ms, render: 2.1s)
+ GET /classroom/_iYWD828P4?view=teacher 200 in 11.4s (compile: 291ms, render: 11.1s)
+ GET /api/server-providers 200 in 13ms (compile: 5ms, render: 9ms)
+ PATCH /api/classroom/_iYWD828P4 200 in 45ms (compile: 31ms, render: 14ms)
+ POST /api/classroom/_iYWD828P4/code-sessions 500 in 2.3s (compile: 42ms, render: 2.2s)
+[?25h
+ ELIFECYCLE  Command failed with exit code 4294967295.

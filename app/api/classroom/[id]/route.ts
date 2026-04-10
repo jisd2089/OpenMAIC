@@ -1,4 +1,4 @@
-import { type NextRequest } from 'next/server';
+import { after, type NextRequest } from 'next/server';
 import { apiError, apiSuccess, API_ERROR_CODES } from '@/lib/server/api-response';
 import { parseJsonRequestWithSchema, parseWithSchema } from '@/lib/server/http-validation';
 import { classroomRouteParamsSchema, patchClassroomSchema } from '@/lib/server/classroom/contracts';
@@ -7,6 +7,8 @@ import { patchClassroom } from '@/lib/server/classroom-patch';
 import { handleRouteError } from '@/lib/server/route-error';
 import { createLogger } from '@/lib/logger';
 import { deleteClassroom } from '@/lib/server/classroom-delete';
+import { enqueueClassroomDifySync } from '@/lib/server/publish/classroom-dify-sync';
+import { getDifyConfig, isDifySyncConfigured } from '@/lib/server/publish/dify-config';
 import type {
   DeleteClassroomResponseData,
   PatchClassroomResponseData,
@@ -54,6 +56,15 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       input: parsed.data,
       baseUrl: buildRequestOrigin(req),
     });
+
+    if (parsed.data.saveMode === 'publish' && isDifySyncConfigured(getDifyConfig())) {
+      after(() =>
+        enqueueClassroomDifySync({
+          classroomId: params.data.id,
+          triggerSource: 'publish',
+        }),
+      );
+    }
 
     return apiSuccess<PatchClassroomResponseData>(result.result);
   } catch (error) {

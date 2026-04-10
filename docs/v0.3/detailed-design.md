@@ -141,6 +141,77 @@ type ClassroomView = 'teacher' | 'student';
 2. “代码运行”页签用于展示运行状态、日志、预览和产物
 3. 若刚触发运行，可自动切到“代码运行”页签
 
+### 2.5 左侧 PPT 导航条改版
+
+本次补充需求要求将当前左侧缩略图场景列表改为“窄轨式场景导航”，视觉目标对齐附件截图红框区域，而不是继续沿用可拉伸的大卡片缩略图侧栏。
+
+设计目标：
+
+1. 左侧导航从“缩略图列表”收敛为“场景进度轨道”
+2. 默认仅承担切页、定位和进度感知，不承担完整内容预览
+3. 保持与现有播放、翻页、PPT 指示效果完全解耦
+4. 在教师端和学生端使用同一套导航视觉语言
+
+建议组件形态：
+
+1. 新增 `SceneRail` 作为课堂左侧固定窄轨导航
+2. 默认宽度控制在 `72px` 到 `88px`
+3. 移除当前侧栏自由拖拽调宽能力，避免与目标样式冲突
+4. 保留折叠能力，但展开态也仅展示窄轨，不再恢复成大缩略图列表
+
+结构建议：
+
+1. 顶部
+   - 预留安全边距，与课堂页头部视觉对齐
+   - 可选放置返回或折叠入口，但不进入轨道主体
+2. 中部主轨道
+   - 纵向居中显示一条细灰色轨道线
+   - 每个场景映射为轨道上的一个圆点节点
+   - 当前场景使用紫色描边空心圆 + 实心中心点
+   - 非当前场景使用浅灰小圆点
+   - 已完成或已浏览场景可使用更高对比度的浅紫点
+   - 生成预览场景、失败场景等异常态使用单独色值或外圈提示
+3. 底部
+   - 固定显示当前页码与总页数，如 `1/18`
+   - 页码区与轨道主体之间保留视觉分隔
+
+交互约束：
+
+1. 点击圆点直接切换到对应场景
+2. 键盘上下方向键与滚轮翻页行为继续生效
+3. 当前场景切换时，轨道高亮和底部分页必须同步更新
+4. hover 或 focus 到节点时，可在轨道右侧浮出轻量预览卡
+5. 预览卡仅作为辅助，不改变主导航窄轨布局
+
+预览卡建议：
+
+1. 展示页码、场景标题、场景类型
+2. `slide` 类型可显示一张小尺寸缩略图
+3. `quiz`、`interactive`、`pbl` 类型显示语义化占位图标和标题
+4. 预览卡在鼠标移出或失焦后自动关闭
+
+长课件处理：
+
+1. 当场景数小于等于 `24` 时，默认显示全部节点
+2. 当场景数超过 `24` 时，轨道进入虚拟窗口模式：
+   - 仅渲染当前场景附近窗口
+   - 顶部和底部通过渐隐提示仍有更多场景
+   - 不允许因为节点过多而把单个节点压缩到不可点击
+3. 当前场景必须尽量保持在轨道可视区域中部
+
+响应式策略：
+
+1. 桌面端默认显示左侧窄轨
+2. 平板端在横向空间不足时允许自动收窄到 `64px`
+3. 小屏设备不强制保留左侧轨道，可降级为底部分页器或抽屉式场景目录
+
+视觉约束：
+
+1. 主体背景采用低对比浅灰 / 半透明白，不引入大面积高饱和背景
+2. 激活色与课堂现有紫色强调体系保持一致
+3. 轨道、节点、分页区的阴影和描边都必须克制，避免盖过主画布
+4. 页面标题和当前场景标题继续保留在主内容区，而不是塞回左轨
+
 ## 3. 代码编辑器设计
 
 ### 3.1 页面级布局
@@ -990,6 +1061,48 @@ type PersistedCodeExecution = {
 };
 ```
 
+### 7.4 Dify 课件同步状态
+
+`v0.3` 将 Dify 视为外部发布目标，而不是现有本地知识库的替代存储。为保证同步可追踪、可重试，服务端需要单独持久化同步状态。
+
+```ts
+type ClassroomDifySyncRecord = {
+  id: string;
+  classroomId: string;
+  provider: 'dify';
+  targetBaseUrl: string;
+  datasetId: string;
+  documentId: string;
+  documentName: string;
+  metadata: {
+    classroom: string;
+    type: 'course' | 'knowledge';
+    title: string;
+  };
+  triggerSource: 'generate' | 'regenerate' | 'publish' | 'manual';
+  status: 'idle' | 'queued' | 'syncing' | 'indexing' | 'completed' | 'failed' | 'skipped';
+  contentHash: string | null;
+  batchId: string | null;
+  remoteIndexingStatus: string | null;
+  remoteCompletedSegments: number | null;
+  remoteTotalSegments: number | null;
+  errorMessage: string | null;
+  lastSyncedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+```
+
+持久化建议：
+
+1. 同步状态与课堂主 JSON 分离存储
+2. 每个课堂最多保留一条当前生效的 Dify 发布记录
+3. 若内容哈希未变化，可直接标记为 `skipped`
+4. 同步失败信息必须保留，便于课堂页或管理页提示与重试
+5. `metadata.classroom` 默认使用课堂唯一标识
+6. `metadata.type` 必须来自 `POST /api/generate-classroom` 的请求字段 `type`
+7. `metadata.title` 默认使用课堂标题或 `stage.name`
+
 ## 8. 请求流程设计
 
 ### 8.1 打开代码编辑器
@@ -1113,6 +1226,58 @@ type PersistedCodeExecution = {
    - 不影响日志和 artifacts 展示
    - 用户可重新运行以获取新预览
 
+### 8.8 课堂生成完成后的 Dify 同步流程
+
+`v0.3` 中，生成课件同步到 Dify 的默认触发点是“课堂生成成功并完成服务端持久化之后”。同步流程必须异步执行，不得阻塞课堂生成成功返回。
+
+1. `POST /api/generate-classroom` 对应后台任务完成课堂 JSON 持久化
+2. 服务端根据部署配置判断是否启用 Dify 发布
+3. 若未启用、缺少 API Key、缺少 `datasetId` 或 `documentId`：
+   - 写入 `skipped`
+   - 不影响课堂生成成功态
+4. 若已启用：
+   - 生成课件同步文本
+   - 计算 `contentHash`
+   - 与最近一次成功同步记录比较
+   - 内容未变化则写入 `skipped`
+5. 若需要同步：
+   - 写入 `queued`
+   - 调用 Dify `Update Document by Text`
+   - 进入 `syncing`
+6. 收到 Dify 返回的 `batch` 后：
+   - 写入 `batchId`
+   - 状态切为 `indexing`
+7. 后台轮询 `Get Document Indexing Status`
+   - 若到达 `completed`，写入 `completed`
+   - 若到达 `error` 或接口失败超阈值，写入 `failed`
+8. 课堂生成结果始终保持 `succeeded`，外部发布失败不反向改写课堂生成任务状态
+
+补充触发源：
+
+1. 课堂重生成成功后可再次触发同步，`triggerSource=regenerate`
+2. 用户在“课堂操作”-“发布”中手动发布时可触发 `triggerSource=publish`
+3. 用户手动点击“重试同步”时可触发 `triggerSource=manual`
+
+### 8.9 课堂操作“发布”触发的 Dify 同步流程
+
+除生成完成后的自动触发外，`v0.3` 还要求支持第二个触发点：“课堂操作”-“发布”。
+
+1. 用户在课堂页点击“课堂操作”-“发布”
+2. 前端先确保当前课堂已完成服务端持久化
+3. 服务端收到发布请求后：
+   - 重新读取最新课堂真值
+   - 重新计算 `contentHash`
+   - 记录 `triggerSource=publish`
+4. Dify 同步仍以异步任务方式执行：
+   - 不阻塞“发布”按钮立即返回
+   - 返回 `queued` 或 `skipped`
+5. 若课堂持久化失败：
+   - 直接返回失败
+   - 不得继续触发 Dify 发布
+6. 若 Dify 发布失败：
+   - 只更新外部发布状态
+   - 不回滚课堂本身
+
 ## 9. 安全与资源约束
 
 ### 9.1 资源控制
@@ -1137,3 +1302,382 @@ type PersistedCodeExecution = {
 1. 代码编辑器不替代互动白板，二者并列存在
 2. 代码运行页签不替代“笔记”“对话”“课堂操作”，而是新增一个并列页签
 3. 代码实验态与课堂结构化内容分离，不影响导出、播放和课堂生成主链路
+4. Dify 同步是课件的外部发布能力，不替代当前本地知识库、课程包导出或课堂持久化真值
+5. 左侧场景导航样式改版只改变导航容器形态，不改变翻页、自动播放、PPT 指示效果与当前场景真值
+
+## 11. Dify 知识库同步设计
+
+### 11.1 范围与边界
+
+本次需求中的 Dify 链路，对接目标是：
+
+1. `baseUrl`: `https://difytestapi.zhizuobiao.com/v1`
+2. `datasetId`: `1d2405b1-910a-4820-b06a-ad61b377c1a1`
+3. `documentId`: `4d54b7ca-d170-482a-85b6-7be5222c1d50`
+
+设计约束：
+
+1. 后端不得直接依赖页面 URL 字符串做抓取或解析
+2. 上述 `datasetId` / `documentId` 作为部署配置输入，而不是硬编码在前端
+3. Dify API Key 仅允许保存在服务端环境变量中
+4. 同步能力默认为服务端能力，浏览器不直接调用 Dify API
+5. 每次同步都必须附带元数据：
+   - `classroom`
+   - `type`
+   - `title`
+6. 当前联调 API Key 必须只通过服务端环境变量注入，不得把明文密钥写入仓库文档、配置文件或前端代码
+
+必要元数据定义：
+
+1. `metadata.classroom`
+   - 取课堂唯一标识，例如 `gJsjGFbKau`
+2. `metadata.type`
+   - 取 `POST /api/generate-classroom` 请求字段 `type`
+   - 必须原样透传，当前有效值为 `course | knowledge`
+3. `metadata.title`
+   - 取课堂标题，例如 `C语言数据结构`
+
+联调环境约束：
+
+1. API 基址固定使用 `https://difytestapi.zhizuobiao.com/v1`
+2. API Key 采用部署侧私密注入
+3. OpenMAIC 文档中只保留 `OPENMAIC_DIFY_API_KEY` 占位，不记录密钥明文
+
+### 11.2 发布目标模型
+
+`v0.3` 默认采用“固定目标文档更新”模式，而不是“每个课堂都在 Dify 新建一个文档”：
+
+1. 直接更新指定 `documentId`
+2. 不在课堂生成完成后自动创建新 Dify 文档
+3. 若目标文档不存在或无权限，直接标记失败并提示人工处理
+
+选择理由：
+
+1. 当前需求已明确指定目标文档地址
+2. 固定文档模式更容易管控权限、目录结构和检索入口
+3. 可以避免为每个课堂额外做远端文档清理与映射回收
+
+### 11.3 同步内容模型
+
+由于 Dify 官方知识库接口支持按文本创建 / 更新文档，`v0.3` 默认将课件序列化为按页分段的 Markdown 文本后再同步。
+
+建议文档结构：
+
+1. 文档头部
+   - 课程标题
+   - 课堂 ID
+   - 语言
+   - 生成时间 / 最近同步时间
+   - 教师端访问链接
+   - 学生端访问链接
+2. 课程概览
+   - 课程目标
+   - 场景总数
+   - 章节概览
+3. 场景正文
+   - 每个场景一个二级标题
+   - 场景类型、页码、标题
+   - 幻灯片中的主要文本提取结果
+   - 教学旁白或关键动作文本摘要
+   - 若存在知识引用，则写入引用来源摘要
+4. 尾部附录
+   - 生成模型和知识库来源摘要
+   - 最近更新时间
+
+内容约束：
+
+1. 只同步适合检索的文本内容，不同步音频二进制、视频二进制和图片二进制
+2. 媒体若需要被引用，只写入资源标题、说明和可访问 URL
+3. Markdown 只是同步介质，最终目标是提高 Dify 检索质量，而不是复刻课堂视觉排版
+4. 课件内容必须按 PPT 页分段保存到 Dify
+5. 单段文本长度上限为 `4000` 字符
+6. 若单页文本超过 `4000` 字符，必须在同一页内继续拆分为多个子段：
+   - 段号格式建议为 `第 3 页 / 片段 2`
+   - 同页子段必须保留相同页码和元数据
+7. 每段都必须带上 `classroom`、`type`、`title` 元数据语义
+
+分段算法建议：
+
+1. 先按 `scene.type=slide` 的 PPT 页进行一级分段
+2. 每页聚合：
+   - 场景标题
+   - 幻灯片文本
+   - 关键动作说明
+   - 引用知识摘要
+3. 对聚合后的页文本执行长度检查
+4. 超过 `4000` 字符时，按段落、列表项或句子边界切分
+5. 切分结果写入统一发布文本，并通过自定义分段规则让 Dify 保持页级边界
+
+### 11.4 Dify 接口选型
+
+基于 Dify 官方文档，`v0.3` 优先采用以下接口组合：
+
+1. `POST /datasets/{dataset_id}/documents/{document_id}/update-by-text`
+2. `GET /datasets/{dataset_id}/documents/{batch}/indexing-status`
+3. `GET /datasets/{dataset_id}/documents/{document_id}`
+4. `GET /datasets/{dataset_id}/documents`
+
+服务端调用策略：
+
+1. 首次启动或部署自检时可通过 `Get Document` 校验目标文档可达
+2. 同步时优先调用 `Update Document by Text`
+3. 更新请求中应显式传入自定义 `process_rule`，使 Dify 依据服务端插入的页级分隔符进行切段
+4. 仅当后续需求切换成“动态建文档”时，才引入 `Create Document by Text`
+5. `batch` 轮询仅在收到 Dify 成功响应后启动
+
+### 11.5 服务端模块拆分
+
+建议新增服务端模块：
+
+1. `lib/server/publish/dify-config.ts`
+   - 负责读取 Dify 配置
+2. `lib/server/publish/dify-client.ts`
+   - 负责封装 HTTP 调用和鉴权
+3. `lib/server/publish/classroom-dify-serializer.ts`
+   - 负责把课堂对象序列化为按页分段的 Markdown
+4. `lib/server/publish/classroom-dify-sync.ts`
+   - 负责排队、同步、轮询和状态写回
+
+建议接口：
+
+```ts
+interface ClassroomPublishTarget {
+  provider: 'dify';
+  syncClassroom(input: {
+    classroomId: string;
+    triggerSource: 'generate' | 'regenerate' | 'publish' | 'manual';
+  }): Promise<ClassroomDifySyncRecord>;
+  getSyncStatus(classroomId: string): Promise<ClassroomDifySyncRecord | null>;
+}
+```
+
+异步触发时序：
+
+1. 触发点一：`POST /api/generate-classroom` 生成成功并完成服务端持久化
+2. 触发点二：“课堂操作”-“发布”在课堂服务端持久化成功之后
+3. 两个触发点都只能把同步任务写入后台队列或异步任务执行器
+4. API 成功返回时不等待 Dify `indexing-status` 进入终态
+5. 后台任务负责：
+   - 读取课堂真值
+   - 提取 `classroom/type/title`
+   - 序列化为按页分段文本
+   - 调用 Dify `update-by-text`
+   - 记录 `batchId`
+   - 轮询 `indexing-status`
+   - 回写终态
+
+推荐时序：
+
+1. 课堂生成成功
+2. 服务端写入 `data/classrooms/<id>.json`
+3. 服务端写入一条 `publish-status=queued`
+4. HTTP 响应立即返回课堂生成成功
+5. 后台 worker 消费该课堂同步任务
+6. 成功调用 Dify 后状态进入 `syncing` / `indexing`
+7. 轮询完成后写回 `completed` 或 `failed`
+
+推荐状态持久化模型：
+
+```ts
+interface ClassroomDifySyncRecord {
+  classroomId: string;
+  provider: 'dify';
+  enabled: boolean;
+  status: 'idle' | 'queued' | 'syncing' | 'indexing' | 'completed' | 'failed' | 'skipped';
+  triggerSource: 'generate' | 'regenerate' | 'publish' | 'manual';
+  datasetId: string;
+  documentId: string;
+  batchId: string | null;
+  metadata: {
+    classroom: string;
+    type: string;
+    title: string;
+  };
+  contentHash: string | null;
+  lastAttemptAt: string | null;
+  lastSyncedAt: string | null;
+  remoteIndexingStatus: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+}
+```
+
+持久化约束：
+
+1. `contentHash` 基于最终分段文本生成，用于判定 `skipped`
+2. `metadata.type` 必须来自课堂生成请求中的 `type`
+3. “发布”触发时若课堂内容未变化，可直接写入 `skipped`
+4. `failed` 不得覆盖已存在的课堂真值文件
+5. 进程重启后需要能够基于已持久化状态继续查询最近一次 Dify 同步结果
+
+联调目标路径：
+
+1. Dify API 基址：`https://difytestapi.zhizuobiao.com/v1`
+2. 目标数据集：`/datasets/1d2405b1-910a-4820-b06a-ad61b377c1a1`
+3. 目标文档：`/documents/4d54b7ca-d170-482a-85b6-7be5222c1d50`
+
+### 11.6 失败恢复与可观测性
+
+必须具备：
+
+1. 请求超时、401、403、404、429、5xx 的分类错误记录
+2. 最近一次成功同步时间
+3. 最近一次失败原因
+4. 当前 `batchId` 和远端 `indexing_status`
+
+恢复策略：
+
+1. 同步失败不阻塞课堂生成
+2. 失败后允许手动重试
+3. 若重复同步内容哈希一致，可跳过无效更新
+4. 若 Dify 长时间停留在 `parsing` / `indexing`，后台应在阈值后标记异常并停止无限轮询
+
+### 11.7 部署配置建议
+
+建议新增配置：
+
+```yaml
+publish:
+  dify:
+    enabled: true
+    baseUrl: https://difytestapi.zhizuobiao.com/v1
+    apiKey: ${OPENMAIC_DIFY_API_KEY}
+    datasetId: 1d2405b1-910a-4820-b06a-ad61b377c1a1
+    documentId: 4d54b7ca-d170-482a-85b6-7be5222c1d50
+    documentName: OpenMAIC Courseware Sync
+    timeoutMs: 30000
+    pollingIntervalMs: 2000
+    maxPollingAttempts: 180
+```
+
+环境变量建议：
+
+```bash
+OPENMAIC_DIFY_ENABLED=true
+OPENMAIC_DIFY_BASE_URL=https://difytestapi.zhizuobiao.com/v1
+OPENMAIC_DIFY_API_KEY=
+OPENMAIC_DIFY_DATASET_ID=1d2405b1-910a-4820-b06a-ad61b377c1a1
+OPENMAIC_DIFY_DOCUMENT_ID=4d54b7ca-d170-482a-85b6-7be5222c1d50
+OPENMAIC_DIFY_DOCUMENT_NAME=OpenMAIC Courseware Sync
+OPENMAIC_DIFY_TIMEOUT_MS=30000
+OPENMAIC_DIFY_POLLING_INTERVAL_MS=2000
+OPENMAIC_DIFY_MAX_POLLING_ATTEMPTS=180
+```
+
+补充说明：
+
+1. 当前联调使用的数据集 API Key 由运维或部署侧注入 `OPENMAIC_DIFY_API_KEY`
+2. 不允许把联调密钥硬编码到：
+   - 仓库文档
+   - `docker-compose.yml`
+   - `.env.example`
+   - 前端请求头
+
+### 11.8 “一课一文档”覆盖说明
+
+本节自本次补充需求起，覆盖 11.2、11.4、11.5、11.7 中所有“固定 `documentId` / 固定目标文档更新”的旧描述。
+
+#### 11.8.1 目标模型
+
+1. 每个 `classroomId` 在同一 `datasetId` 下必须绑定一个独立 Dify 文档
+2. 课堂与 Dify 文档是一对一关系，不允许多个课堂反复覆盖同一远端文档
+3. 课堂首次同步时创建文档，后续同步更新该课堂自己的 `documentId`
+4. 推荐文档名模板：`[{type}] {title} ({classroom})`
+5. 文档列表页应能直接看到每门课对应的一行记录
+
+#### 11.8.2 服务端状态模型补充
+
+```ts
+interface ClassroomDifySyncRecordV2 {
+  classroomId: string;
+  provider: 'dify';
+  enabled: boolean;
+  status: 'idle' | 'queued' | 'syncing' | 'indexing' | 'completed' | 'failed' | 'skipped';
+  triggerSource: 'generate' | 'regenerate' | 'publish' | 'manual';
+  datasetId: string;
+  documentId: string | null;
+  documentName: string | null;
+  documentCreatedAt: string | null;
+  batchId: string | null;
+  metadata: {
+    classroom: string;
+    type: string;
+    title: string;
+  };
+  contentHash: string | null;
+  remoteIndexingStatus: string | null;
+  lastAttemptAt: string | null;
+  lastSyncedAt: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+}
+```
+
+补充约束：
+
+1. `documentId` 在首次创建成功前允许为空
+2. 一旦 Dify 创建成功，`documentId` 必须被持久化并作为后续更新唯一依据
+3. 若远端文档被删除且 `GET document` 返回 `404`，服务端必须自动走“重新创建并重绑定”补偿流程
+4. `documentName` 为远端真值的一部分，必须与本地记录一起保存，便于联调和后台核对
+
+#### 11.8.3 首次同步流程
+
+1. 课堂生成成功并完成服务端持久化
+2. 后台异步任务读取课堂真值并序列化为按页分段文本
+3. 若当前课堂尚无 `documentId`
+4. 调用 Dify `Create Document by Text`
+5. 获得 `documentId` 与 `batch`
+6. 回写 `documentId`、`documentName`、`documentCreatedAt`
+7. 再补写元数据 `classroom`、`type`、`title`
+8. 进入 `indexing` 轮询，直至 `completed` 或 `failed`
+
+#### 11.8.4 后续同步流程
+
+1. 若当前课堂已有 `documentId`
+2. 优先调用 Dify `Update Document by Text`
+3. 若 `contentHash` 未变化，可直接记为 `skipped`
+4. 若远端返回 `404`，判定远端文档丢失
+5. 自动切回“创建文档”分支，生成新的 `documentId`
+
+#### 11.8.5 接口选型覆盖
+
+1. 首次同步优先使用 Dify 创建文档接口
+2. 已绑定 `documentId` 后使用 Dify 更新文档接口
+3. `GET /datasets/{dataset_id}/documents` 用于联调时确认文档是否在列表中可见
+4. 不再存在“所有课堂都写入固定 `documentId`”的合法实现
+
+#### 11.8.6 部署配置覆盖
+
+覆盖后的 Dify 配置如下：
+
+```yaml
+publish:
+  dify:
+    enabled: true
+    baseUrl: https://difytestapi.zhizuobiao.com/v1
+    apiKey: ${OPENMAIC_DIFY_API_KEY}
+    datasetId: 1d2405b1-910a-4820-b06a-ad61b377c1a1
+    documentNameTemplate: "[{type}] {title} ({classroom})"
+    timeoutMs: 30000
+    pollingIntervalMs: 2000
+    maxPollingAttempts: 180
+```
+
+对应环境变量：
+
+```bash
+OPENMAIC_DIFY_ENABLED=true
+OPENMAIC_DIFY_BASE_URL=https://difytestapi.zhizuobiao.com/v1
+OPENMAIC_DIFY_API_KEY=
+OPENMAIC_DIFY_DATASET_ID=1d2405b1-910a-4820-b06a-ad61b377c1a1
+OPENMAIC_DIFY_DOCUMENT_NAME_TEMPLATE=[{type}] {title} ({classroom})
+OPENMAIC_DIFY_TIMEOUT_MS=30000
+OPENMAIC_DIFY_POLLING_INTERVAL_MS=2000
+OPENMAIC_DIFY_MAX_POLLING_ATTEMPTS=180
+```
+
+补充说明：
+
+1. 固定 `OPENMAIC_DIFY_DOCUMENT_ID` 不再属于新设计
+2. 课堂专属 `documentId` 必须在运行时创建后写入本地状态记录
+3. 删除本地课堂时，`v0.3` 不要求自动删除远端 Dify 文档；远端清理如需支持，另行设计

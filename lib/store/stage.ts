@@ -132,9 +132,14 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
       currentSceneId: null,
       chats: [],
       workspaceMode: 'present',
+      outlines: [],
+      generatingOutlines: [],
       regenerationPreviewSceneIds: [],
       regenerationPreviewScenes: [],
       showRegenerationPreview: false,
+      generationStatus: 'idle',
+      currentGeneratingOrder: -1,
+      failedOutlines: [],
       generationEpoch: s.generationEpoch + 1,
     }));
     debouncedSave();

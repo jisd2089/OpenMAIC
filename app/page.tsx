@@ -583,6 +583,7 @@ function HomePage() {
 
       const sessionState = buildGenerationSessionStorage({
         sessionId: nanoid(),
+        type: 'course',
         requirements,
         scopeId: DEFAULT_SCOPE_ID,
         knowledgeBaseIds: selectedKnowledgeBaseIds,

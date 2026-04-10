@@ -42,6 +42,42 @@ export function hasGenerationContextSummary(
   );
 }
 
+function arraysEqual<T>(left?: T[] | null, right?: T[] | null): boolean {
+  if (left === right) return true;
+  if (!left && !right) return true;
+  if (!left || !right) return false;
+  if (left.length !== right.length) return false;
+
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+export function isGenerationContextSummaryEqual(
+  left?: GenerationContextSummary | null,
+  right?: GenerationContextSummary | null,
+): boolean {
+  if (left === right) return true;
+  if (!left && !right) return true;
+  if (!left || !right) return false;
+
+  return (
+    left.classroomType === right.classroomType &&
+    left.scopeId === right.scopeId &&
+    arraysEqual(left.knowledgeBaseIds, right.knowledgeBaseIds) &&
+    arraysEqual(left.memoryIds, right.memoryIds) &&
+    arraysEqual(left.selectedKnowledgeBases, right.selectedKnowledgeBases) &&
+    arraysEqual(left.selectedMemories, right.selectedMemories) &&
+    left.enableKnowledgeRetrieval === right.enableKnowledgeRetrieval &&
+    left.enableMemoryRetrieval === right.enableMemoryRetrieval &&
+    left.preferKnowledgeVideos === right.preferKnowledgeVideos
+  );
+}
+
 export function mergeGenerationContextSummary(
   primary?: GenerationContextSummary | null,
   fallback?: GenerationContextSummary | null,
@@ -49,6 +85,7 @@ export function mergeGenerationContextSummary(
   if (!primary && !fallback) return null;
 
   return {
+    classroomType: primary?.classroomType ?? fallback?.classroomType,
     scopeId: preferNonBlankString(primary?.scopeId, fallback?.scopeId),
     knowledgeBaseIds: preferNonEmptyArray(primary?.knowledgeBaseIds, fallback?.knowledgeBaseIds),
     memoryIds: preferNonEmptyArray(primary?.memoryIds, fallback?.memoryIds),

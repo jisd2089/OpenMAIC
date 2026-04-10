@@ -21,6 +21,7 @@ export interface SelectedMemorySummary {
 // Session state stored in sessionStorage
 export interface GenerationSessionState {
   sessionId: string;
+  type: 'course' | 'knowledge';
   requirements: UserRequirements;
   scopeId?: string;
   knowledgeBaseIds?: string[];

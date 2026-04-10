@@ -72,6 +72,19 @@
 /classroom/{id}?view=student
 ```
 
+### 2.3 左侧 PPT 导航条
+
+约束：
+
+1. 课堂页左侧导航改为固定窄轨式场景导航，不再使用大缩略图卡片列表作为默认形态
+2. 导航轨道默认宽度控制在 `72px` 到 `88px`
+3. 每个场景在轨道上展示一个圆点节点
+4. 当前场景使用高亮紫色空心圆 + 中心实点表示
+5. 底部固定显示当前页码与总页数，例如 `1/18`
+6. 点击节点后必须切换到对应场景
+7. hover 或 focus 节点时可显示轻量预览卡，但预览卡不改变窄轨主体布局
+8. 样式改版只影响导航容器视觉，不改变翻页、自动播放、PPT 指示效果和当前场景真值
+
 ## 3. 课堂生成接口
 
 ### 3.1 创建课堂生成任务
@@ -145,6 +158,7 @@
 1. `type` 允许 `course | knowledge`
 2. 未传 `type` 时按 `course` 处理
 3. 创建响应必须返回 `jobId` 与预分配的 `classroomId`
+4. `type` 字段必须原样透传到后续 Dify 同步元数据中，作为 `metadata.type`
 
 ### 3.2 查询课堂生成任务
 
@@ -195,6 +209,7 @@
 1. 成功态中的 `result.classroomId` 必须与创建响应中的 `classroomId` 一致
 2. `result.url` 返回课堂基础地址，前端展示时应继续按 `?view=teacher|student` 组装最终访问链接
 3. 课堂生成完成后，课堂数据会落到服务端持久化存储，可被首页列表发现
+4. 若部署启用了 Dify 发布，课堂生成成功后必须异步触发课件同步；外部同步失败不得反向把课堂生成任务改写为 `failed`
 
 ## 4. 课堂列表与课堂详情接口
 
@@ -260,6 +275,104 @@
 2. `stage.name` 按前端同一标题提取规则生成
 3. 若课堂包含自动生成角色，服务端持久化数据中可包含 `stage.generatedAgents`
 4. 前端打开课堂时需要恢复这些 `generatedAgents`
+
+### 4.3 获取课堂外部同步状态
+
+`GET /api/classroom/:id/publish-status`
+
+成功响应示例：
+
+```json
+{
+  "success": true,
+  "classroomId": "cls_newton_001",
+  "targets": [
+    {
+      "provider": "dify",
+      "enabled": true,
+      "status": "indexing",
+      "targetBaseUrl": "https://difytestapi.zhizuobiao.com/v1",
+      "datasetId": "1d2405b1-910a-4820-b06a-ad61b377c1a1",
+      "documentId": "4d54b7ca-d170-482a-85b6-7be5222c1d50",
+      "documentName": "OpenMAIC Courseware Sync",
+      "triggerSource": "generate",
+      "metadata": {
+        "classroom": "gJsjGFbKau",
+        "type": "knowledge",
+        "title": "C语言数据结构"
+      },
+      "batchId": "20250306150245647595",
+      "remoteIndexingStatus": "splitting",
+      "lastSyncedAt": "2026-04-10T08:00:00.000Z",
+      "errorMessage": null
+    }
+  ]
+}
+```
+
+约束：
+
+1. 该接口返回课堂当前所有外部发布目标的最新状态
+2. `provider=dify` 时必须返回 `datasetId` 与 `documentId`
+3. `provider=dify` 时必须返回 `metadata.classroom`、`metadata.type`、`metadata.title`
+4. 状态至少覆盖：`idle | queued | syncing | indexing | completed | failed | skipped`
+5. 若 Dify 未启用，接口仍返回 `provider=dify`，但 `enabled=false`
+6. `triggerSource` 至少覆盖：`generate | regenerate | publish | manual`
+7. `triggerSource=generate` 表示课堂生成成功且完成服务端持久化后异步入队
+8. `triggerSource=publish` 表示用户在“课堂操作”-“发布”后，服务端持久化成功再异步入队
+9. `status=skipped` 时表示 `contentHash` 未变化，本次未再次调用 Dify 更新接口
+10. `v0.3` 的 Dify 同步采用“一课一文档”语义：每个 `classroomId` 在同一 `datasetId` 下必须绑定一个独立 `documentId`
+11. 首次同步时若该课堂尚无远端文档，服务端必须先创建 Dify 文档，再回写 `documentId` 与 `documentName`
+12. 后续同步必须优先复用该课堂已绑定的 `documentId`，不得把多个课堂反复写入同一个固定 Dify 文档
+
+“一课一文档”补充返回约束：
+
+```json
+{
+  "provider": "dify",
+  "datasetId": "1d2405b1-910a-4820-b06a-ad61b377c1a1",
+  "documentId": "doc_7f4d2f9f8e7b4a1b",
+  "documentName": "[knowledge] C语言数据结构 (gJsjGFbKau)"
+}
+```
+
+说明：
+1. `documentId` 为课堂专属远端文档标识
+2. `documentName` 推荐由 `type + title + classroomId` 组成，保证列表页可直接识别来源课堂
+3. 在首次入队但远端尚未创建完成前，`documentId` 可暂时为空；一旦 Dify 创建成功，后续状态查询必须返回稳定值
+
+### 4.4 手动触发 Dify 同步
+
+`POST /api/classroom/:id/publish/dify`
+
+请求体示例：
+
+```json
+{
+  "force": true
+}
+```
+
+成功响应示例：
+
+```json
+{
+  "success": true,
+  "classroomId": "cls_newton_001",
+  "provider": "dify",
+  "status": "queued",
+  "triggerSource": "manual"
+}
+```
+
+约束：
+
+1. 该接口用于手动重试或强制重发课件到 Dify
+2. `force=false` 时，若课堂内容哈希未变化，服务端可直接返回 `skipped`
+3. `force=true` 时，即使内容哈希未变化也必须重新发起一次远端更新
+4. 该接口只允许服务端持有的 Dify 配置生效，浏览器不得自带外部 API Key
+5. 该接口的默认触发源为“课堂操作”-“发布”，服务端记录 `triggerSource=publish`
+6. 若该课堂尚未在 Dify 创建专属文档，则本接口首次执行必须走“创建文档”分支，而不是依赖固定 `documentId`
 
 ## 5. 课堂删除接口
 

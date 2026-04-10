@@ -37,6 +37,7 @@ const selectedMemorySummarySchema = z.object({
 
 const generationSessionSchema = z.object({
   sessionId: z.string().trim().min(1),
+  type: z.enum(['course', 'knowledge']).default('course'),
   requirements: userRequirementsSchema,
   scopeId: z.string().optional().transform((value) => normalizeScopeId(value)),
   knowledgeBaseIds: z.array(z.string().trim().min(1)).optional(),
@@ -73,6 +74,7 @@ const generationSessionSchema = z.object({
 });
 
 const generationParamsSchema = z.object({
+  type: z.enum(['course', 'knowledge']).default('course'),
   pdfImages: z.array(z.unknown()).optional(),
   scopeId: z.string().optional().transform((value) => normalizeScopeId(value)),
   agents: z.array(z.unknown()).optional(),

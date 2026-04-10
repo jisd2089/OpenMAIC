@@ -1,0 +1,20 @@
+
+> openmaic@0.1.0 dev D:\github\OpenMAIC
+> next dev "--port" "3001"
+
+▲ Next.js 16.1.2 (Turbopack)
+- Local:         http://localhost:3001
+- Network:       http://10.11.20.50:3001
+- Environments: .env.local
+- Experiments (use with caution):
+  · proxyClientMaxBodySize: "200mb"
+
+✓ Starting...
+Creating turbopack project { dir: 'D:\\github\\OpenMAIC', testMode: true }
+✓ Ready in 12.4s
+○ Compiling /classroom/[id] ...
+ GET /classroom/_iYWD828P4?view=teacher 200 in 24.4s (compile: 23.6s, render: 863ms)
+[2026-04-10T07:04:55.984Z] [INFO] [ServerProviderConfig] [ServerProviderConfig] Loaded (server-providers.yml): 1 LLM, 1 TTS, 1 ASR, 1 PDF, 1 Image, 0 Video, 1 WebSearch providers
+ GET /api/server-providers 200 in 1290ms (compile: 1279ms, render: 11ms)
+ GET /api/classroom?id=_iYWD828P4 404 in 1246ms (compile: 1096ms, render: 150ms)
+ ELIFECYCLE  Command failed with exit code 3221225786.

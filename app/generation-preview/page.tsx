@@ -378,8 +378,11 @@ function GenerationPreviewContent() {
         language: currentSession.requirements.language || 'zh-CN',
         style: 'professional',
         generationContext:
-          currentSession.knowledgeBaseIds?.length || currentSession.memoryIds?.length
+          currentSession.type ||
+          currentSession.knowledgeBaseIds?.length ||
+          currentSession.memoryIds?.length
             ? {
+                classroomType: currentSession.type,
                 scopeId: currentSession.scopeId,
                 knowledgeBaseIds: currentSession.knowledgeBaseIds,
                 memoryIds: currentSession.memoryIds,
@@ -830,6 +833,7 @@ function GenerationPreviewContent() {
         'generationParams',
         JSON.stringify(
           buildGenerationParamsStorage({
+            type: currentSession.type,
             pdfImages: currentSession.pdfImages,
             scopeId: currentSession.scopeId ?? DEFAULT_SCOPE_ID,
             agents,

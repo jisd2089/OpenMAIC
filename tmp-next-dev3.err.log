@@ -1,0 +1,42 @@
+⚠ ./lib/server/code
+Package typescript can't be external
+The request typescript/bin/tsc matches serverExternalPackages (or the default list).
+Only .mjs, .cjs, .js, .json, or .node can be handled by Node.js.
+
+
+[2026-04-10T07:15:49.355Z] [ERROR] [ClassroomCodeSessionsRoute] Failed to create or restore code session {"classroomId":"_iYWD828P4","sceneId":"scene_FuyCFKcatJ","error":{"status":1,"signal":null,"output":[null,"","Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?\n"],"pid":48404,"stdout":"","stderr":"Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?\n"}}
+⚠ ./lib/server/code
+Package typescript can't be external
+The request typescript/bin/tsc matches serverExternalPackages (or the default list).
+Only .mjs, .cjs, .js, .json, or .node can be handled by Node.js.
+
+
+[2026-04-10T07:19:36.731Z] [ERROR] [ClassroomCodeSessionsRoute] Failed to create or restore code session {"classroomId":"_iYWD828P4","sceneId":"scene_FuyCFKcatJ","error":{"status":1,"signal":null,"output":[null,"","Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?\n"],"pid":28896,"stdout":"","stderr":"Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?\n"}}
+⚠ ./lib/server/code
+Package typescript can't be external
+The request typescript/bin/tsc matches serverExternalPackages (or the default list).
+Only .mjs, .cjs, .js, .json, or .node can be handled by Node.js.
+
+
+[2026-04-10T07:20:48.517Z] [ERROR] [ClassroomCodeSessionsRoute] Failed to create or restore code session {"classroomId":"_iYWD828P4","sceneId":"scene_FuyCFKcatJ","error":{"status":1,"signal":null,"output":[null,"","Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?\n"],"pid":90912,"stdout":"","stderr":"Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?\n"}}
+⚠ ./lib/server/code
+Package typescript can't be external
+The request typescript/bin/tsc matches serverExternalPackages (or the default list).
+Only .mjs, .cjs, .js, .json, or .node can be handled by Node.js.
+
+
+[2026-04-10T07:23:09.278Z] [ERROR] [ClassroomCodeSessionsRoute] Failed to create or restore code session {"classroomId":"_iYWD828P4","sceneId":"scene_FuyCFKcatJ","error":{"status":1,"signal":null,"output":[null,"","Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?\n"],"pid":41868,"stdout":"","stderr":"Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?\n"}}
+⚠ ./lib/server/code
+Package typescript can't be external
+The request typescript/bin/tsc matches serverExternalPackages (or the default list).
+Only .mjs, .cjs, .js, .json, or .node can be handled by Node.js.
+
+
+[2026-04-10T07:24:03.615Z] [ERROR] [ClassroomCodeSessionsRoute] Failed to create or restore code session {"classroomId":"_iYWD828P4","sceneId":"scene_FuyCFKcatJ","error":{"status":1,"signal":null,"output":[null,"","Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?\n"],"pid":14492,"stdout":"","stderr":"Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?\n"}}
+⚠ ./lib/server/code
+Package typescript can't be external
+The request typescript/bin/tsc matches serverExternalPackages (or the default list).
+Only .mjs, .cjs, .js, .json, or .node can be handled by Node.js.
+
+
+[2026-04-10T07:26:44.908Z] [ERROR] [ClassroomCodeSessionsRoute] Failed to create or restore code session {"classroomId":"_iYWD828P4","sceneId":"scene_FuyCFKcatJ","error":{"status":1,"signal":null,"output":[null,"","Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?\n"],"pid":33920,"stdout":"","stderr":"Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?\n"}}

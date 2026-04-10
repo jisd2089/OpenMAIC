@@ -28,11 +28,16 @@ import type { GenerationContextSummary } from '@/lib/types/stage';
 import type { ChatAreaExtraTab } from '@/components/chat/chat-area';
 import {
   hasGenerationContextSummary,
+  isGenerationContextSummaryEqual,
   mergeGenerationContextSummary,
 } from '@/lib/context/generation-context';
 import { buildClassroomPath, normalizeClassroomView } from '@/lib/classroom/view';
 import { prepareCoursePackageAssets } from '@/lib/classroom/prepare-course-package-assets';
 import { ensureClassroomPersisted } from '@/lib/classroom/ensure-classroom-persisted';
+import {
+  hasMatchingLoadedStage,
+  normalizeLoadedClassroom,
+} from '@/lib/classroom/classroom-load';
 
 const log = createLogger('Classroom');
 
@@ -224,28 +229,61 @@ export default function ClassroomDetailPage() {
 
   const loadClassroom = useCallback(async () => {
     try {
-      await loadFromStorage(classroomId);
+      const initialState = useStageStore.getState();
+      if (!hasMatchingLoadedStage(initialState.stage, classroomId) && initialState.stage?.id) {
+        log.info('Clearing stale classroom state before loading target classroom', {
+          requestedClassroomId: classroomId,
+          staleStageId: initialState.stage.id,
+        });
+        initialState.clearStore();
+      }
 
-      // If IndexedDB had no data, try server-side storage (API-generated classrooms)
-      if (!useStageStore.getState().stage) {
-        log.info('No IndexedDB data, trying server-side storage for:', classroomId);
+      await loadFromStorage(classroomId);
+      let activeStage = useStageStore.getState().stage;
+
+      if (!hasMatchingLoadedStage(activeStage, classroomId)) {
+        log.info('IndexedDB classroom missing or mismatched, falling back to server storage', {
+          classroomId,
+          loadedStageId: activeStage?.id ?? null,
+        });
         try {
           const res = await fetch(`/api/classroom?id=${encodeURIComponent(classroomId)}`);
           if (res.ok) {
             const json = await res.json();
             if (json.success && json.classroom) {
-              const { stage, scenes } = json.classroom;
+              const normalized = normalizeLoadedClassroom(classroomId, json.classroom);
+              if (!normalized) {
+                throw new Error('Invalid classroom payload received from server');
+              }
+
+              const { stage, scenes } = normalized;
               useStageStore.getState().setStage(stage);
               useStageStore.setState({
                 scenes,
                 currentSceneId: scenes[0]?.id ?? null,
+                outlines: [],
+                generatingOutlines: [],
+                failedOutlines: [],
+                generationStatus: 'idle',
+                currentGeneratingOrder: -1,
               });
-              log.info('Loaded from server-side storage:', classroomId);
+              activeStage = stage;
+              log.info('Loaded classroom from server-side storage', {
+                classroomId,
+                stageId: stage.id,
+                sceneCount: scenes.length,
+                stageName: stage.name,
+                classroomType: stage.generationContext?.classroomType ?? null,
+              });
             }
           }
         } catch (fetchErr) {
           log.warn('Server-side storage fetch failed:', fetchErr);
         }
+      }
+
+      if (!hasMatchingLoadedStage(activeStage, classroomId)) {
+        throw new Error(`Classroom load failed: ${classroomId}`);
       }
 
       // Restore completed media generation tasks from IndexedDB
@@ -302,7 +340,12 @@ export default function ClassroomDetailPage() {
       throw new Error(json.error || 'Failed to reload classroom');
     }
 
-    const { stage, scenes } = json.classroom;
+    const normalized = normalizeLoadedClassroom(classroomId, json.classroom);
+    if (!normalized) {
+      throw new Error('Invalid classroom payload received from server');
+    }
+
+    const { stage, scenes } = normalized;
     const { currentSceneId, workspaceMode } = useStageStore.getState();
     useStageStore.getState().setStage(stage);
     useStageStore.setState({
@@ -382,6 +425,7 @@ export default function ClassroomDetailPage() {
     const stageContext = stage?.generationContext;
     const sessionContext = params
       ? {
+          classroomType: params.type,
           scopeId: params.scopeId,
           knowledgeBaseIds: params.knowledgeBaseIds,
           memoryIds: params.memoryIds,
@@ -396,7 +440,9 @@ export default function ClassroomDetailPage() {
     const pdfImages = (params?.pdfImages as PdfImage[] | undefined) ?? undefined;
     const agents = (params?.agents as AgentInfo[] | undefined) ?? undefined;
 
-    setContextSummary(effectiveContext);
+    setContextSummary((current) =>
+      isGenerationContextSummaryEqual(current, effectiveContext) ? current : effectiveContext,
+    );
 
     if (hasPending && stage) {
       generationStartedRef.current = true;

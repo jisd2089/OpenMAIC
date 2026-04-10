@@ -428,8 +428,11 @@ export async function generateClassroom(
     language: lang,
     style: 'professional',
     generationContext:
-      input.knowledgeBaseIds?.length || input.memoryIds?.length
+      input.type ||
+      input.knowledgeBaseIds?.length ||
+      input.memoryIds?.length
         ? {
+            classroomType: input.type,
             scopeId,
             knowledgeBaseIds: input.knowledgeBaseIds,
             memoryIds: input.memoryIds,

@@ -1,5 +1,7 @@
 import { createLogger } from '@/lib/logger';
 import { generateClassroom, type GenerateClassroomInput } from '@/lib/server/classroom-generation';
+import { getDifyConfig, isDifySyncConfigured } from '@/lib/server/publish/dify-config';
+import { enqueueClassroomDifySync } from '@/lib/server/publish/classroom-dify-sync';
 import {
   markClassroomGenerationJobFailed,
   markClassroomGenerationJobRunning,
@@ -33,6 +35,12 @@ export function runClassroomGenerationJob(
       });
 
       await markClassroomGenerationJobSucceeded(jobId, result);
+      if (isDifySyncConfigured(getDifyConfig())) {
+        void enqueueClassroomDifySync({
+          classroomId: result.id,
+          triggerSource: 'generate',
+        });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       log.error(`Classroom generation job ${jobId} failed:`, error);
